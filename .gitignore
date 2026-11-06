@@ -1,0 +1,16 @@
+/bin/
+/.local/
+*.log
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+id_ecdsa*
+id_dsa*
+.ssh/
+.runpod/
+credentials*.json

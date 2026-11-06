@@ -1,0 +1,2 @@
+# Inference environment. Projects should use their own uv environments.
+vllm==0.33.0

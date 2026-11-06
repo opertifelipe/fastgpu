@@ -1,0 +1,24 @@
+# Add one Ubuntu package per line and rebuild the image.
+ca-certificates
+curl
+git
+openssh-server
+rsync
+python3
+python3-venv
+supervisor
+tmux
+less
+vim-tiny
+build-essential
+cmake
+pkg-config
+nodejs
+npm
+libgomp1
+libcurl4t64
+libssl3t64
+libnuma1
+libgl1
+libglib2.0-0t64
+util-linux
