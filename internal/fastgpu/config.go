@@ -69,7 +69,7 @@ func newApp() (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	a := &App{Dir: dir, Input: os.Stdin, Config: Config{Image: "felipeoperti/fastgpu-workspace:0.2.1", MinVRAM: 24, MinRAM: 32, MinCUDA: "13.0", Disk: 40, Context: 16384, LocalPort: 8080, SSHKey: filepath.Join(dir, "id_ed25519")}}
+	a := &App{Dir: dir, Input: os.Stdin, Config: Config{Image: "felipeoperti/fastgpu-workspace:0.2.1", MinVRAM: 24, MinRAM: 32, MinCUDA: "13.0", Disk: 40, Context: 131072, LocalPort: 8080, SSHKey: filepath.Join(dir, "id_ed25519")}}
 	for _, f := range []struct {
 		name string
 		dst  any

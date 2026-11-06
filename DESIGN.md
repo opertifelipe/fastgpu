@@ -20,7 +20,7 @@ This allows Pods to be recreated or images updated while retaining work. System 
 
 Deployment accepts a path on the volume and selects llama.cpp, Ollama, or vLLM. One managed service uses internal port 8080; the client exposes its API through SSH on the local loopback interface.
 
-Engines have different format and configuration requirements. The CLI provides additional arguments and a custom Modelfile without assuming that every GGUF works with every engine. Qwen is an optional preset; the main workflow supports users' own models.
+Engines have different format and configuration requirements. The CLI provides additional arguments and a custom Modelfile without assuming that every GGUF works with every engine. Qwen and Nanbeige are optional presets; the main workflow supports users' own models.
 
 ## Machine selection and control
 

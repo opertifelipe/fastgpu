@@ -255,7 +255,7 @@ func (a *App) command(ctx context.Context) *cobra.Command {
 	}
 	model := &cobra.Command{Use: "model", Short: "Manage persistent GGUF models"}
 	root.AddCommand(model)
-	model.AddCommand(&cobra.Command{Use: "pull [qwen3.8-27b]", Short: "Download and verify the GGUF", Args: validModel, RunE: func(_ *cobra.Command, _ []string) error {
+	model.AddCommand(&cobra.Command{Use: "pull [MODEL]", Short: "Download and verify a preset: " + strings.Join(presetAliases(), ", "), ValidArgs: presetAliases(), Args: validModel, RunE: func(_ *cobra.Command, args []string) error {
 		c, e := a.client()
 		if e != nil {
 			return e
@@ -264,9 +264,17 @@ func (a *App) command(ctx context.Context) *cobra.Command {
 		if e != nil {
 			return e
 		}
-		return a.remote(ctx, p, []string{"fastgpu", "worker", "prepare"}, nil, os.Stdout, os.Stderr, false)
+		return a.remote(ctx, p, append([]string{"fastgpu", "worker", "prepare"}, args...), nil, os.Stdout, os.Stderr, false)
 	}})
-	model.AddCommand(&cobra.Command{Use: "list", Short: "List model files on the volume", Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error {
+	model.AddCommand(&cobra.Command{Use: "list [DIRECTORY]", Short: "List installed GGUFs with their deploy alias or path", Args: cobra.MaximumNArgs(1), RunE: func(_ *cobra.Command, args []string) error {
+		dir := modelDir
+		if len(args) != 0 {
+			var e error
+			dir, e = modelPath(args[0])
+			if e != nil {
+				return e
+			}
+		}
 		c, e := a.client()
 		if e != nil {
 			return e
@@ -275,7 +283,7 @@ func (a *App) command(ctx context.Context) *cobra.Command {
 		if e != nil {
 			return e
 		}
-		return a.remote(ctx, p, []string{"ls", "-lh", modelDir}, nil, os.Stdout, os.Stderr, false)
+		return a.remote(ctx, p, []string{"fastgpu", "worker", "list-models", dir}, nil, os.Stdout, os.Stderr, false)
 	}})
 	var deployment Deployment
 	deploy := add("deploy [MODEL_OR_PATH]", "Serve a GGUF or checkpoint with llama.cpp, Ollama, or vLLM", 0, true, func(_ *cobra.Command, args []string) error {
@@ -288,7 +296,7 @@ func (a *App) command(ctx context.Context) *cobra.Command {
 		if d.Model == "" {
 			d.Model = defaultModelName(d.Target)
 		}
-		if d.Target != ModelAlias && !d.HF {
+		if _, preset := modelPresets[d.Target]; !preset && !d.HF {
 			var e error
 			d.Target, e = modelPath(d.Target)
 			if e != nil {
@@ -460,10 +468,25 @@ func (a *App) command(ctx context.Context) *cobra.Command {
 		return printJSON(map[string]any{"pod": p.ID, "status": p.Status, "compute_usd_per_hour": p.Cost, "created_at": p.CreatedAt, "note": "Storage is billed separately; the compute rate does not imply billing while EXITED"})
 	})
 	a.volumeCommands(root, ctx)
-	worker := &cobra.Command{Use: "worker ACTION", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(_ *cobra.Command, args []string) error {
+	worker := &cobra.Command{Use: "worker ACTION [ARG]", Hidden: true, Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) > 0 && (args[0] == "prepare" || args[0] == "list-models") {
+			return cobra.RangeArgs(1, 2)(cmd, args)
+		}
+		return cobra.ExactArgs(1)(cmd, args)
+	}, RunE: func(_ *cobra.Command, args []string) error {
 		switch args[0] {
 		case "prepare":
-			return prepareModel(ctx)
+			alias := ModelAlias
+			if len(args) == 2 {
+				alias = args[1]
+			}
+			return prepareModel(ctx, alias)
+		case "list-models":
+			dir := modelDir
+			if len(args) == 2 {
+				dir = args[1]
+			}
+			return listModels(os.Stdout, workspace, dir)
 		case "serve":
 			return workerServe()
 		case "check":
@@ -491,8 +514,8 @@ func (a *App) command(ctx context.Context) *cobra.Command {
 	return root
 }
 func validModel(_ *cobra.Command, args []string) error {
-	if len(args) > 1 || (len(args) == 1 && args[0] != ModelAlias) {
-		return fmt.Errorf("supported model: %s", ModelAlias)
+	if len(args) > 1 || (len(args) == 1 && modelPresets[args[0]].File == "") {
+		return fmt.Errorf("supported models: %s", strings.Join(presetAliases(), ", "))
 	}
 	return nil
 }

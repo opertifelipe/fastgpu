@@ -49,7 +49,7 @@ The Network Volume is mounted at **`/workspace`**. The home directory **`/home/g
 | Repositories and projects | A directory under `/home/gpu`, such as `~/projects` |
 | Datasets | `/home/gpu/datasets` or another directory under `/workspace` |
 | Training checkpoints and outputs | `/home/gpu/checkpoints` or another directory under `/workspace` |
-| Qwen preset GGUF | `/workspace/.gpu/models` |
+| Preset GGUF files | `/workspace/.gpu/models` |
 | Hugging Face, PyTorch, and uv caches | `/home/gpu/.cache` |
 | Ollama models and blobs | `/workspace/.gpu/ollama/models` |
 
@@ -97,7 +97,11 @@ curl http://127.0.0.1:8080/v1/chat/completions \
   -d '{"model":"my-model","messages":[{"role":"user","content":"Hello!"}],"max_tokens":128}'
 ```
 
-For the included preset, run `fastgpu deploy qwen3.8-27b`. GGUF with vLLM requires an explicit tokenizer and a compatible model; vLLM's GGUF support is experimental. Use `--arg` for llama.cpp/vLLM options and `--modelfile` for Ollama: see [deployment and customization](docs/MODELS.md).
+The included presets are `qwen3.8-27b` and `nanbeige4.3-33b`. Run `fastgpu deploy nanbeige4.3-33b` to download, verify, and serve Nanbeige's Q4_K_M GGUF (about 20.8 GB). Qwen remains the default. At a 128k context, Nanbeige needs more than 24 GB VRAM with the default full GPU offload and FP16 KV cache; select hardware and cache settings accordingly.
+
+`fastgpu model list` shows installed GGUFs in the managed directory, with the alias or quoted path to pass to `deploy`. Use `fastgpu model list /workspace/models` to search another directory on the volume, including its subdirectories.
+
+GGUF with vLLM requires an explicit tokenizer and a compatible model; vLLM's GGUF support is experimental. Use `--arg` for llama.cpp/vLLM options and `--modelfile` for Ollama: see [deployment and customization](docs/MODELS.md).
 
 ## Machine information and connections
 

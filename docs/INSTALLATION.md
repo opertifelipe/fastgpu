@@ -144,7 +144,7 @@ The CLI rename retains `GPU_CONFIG_DIR`, the `gpu` profile directory, `gpu-*` Po
 | `ssh_config`, `known_hosts` | Connection settings and server identities |
 | `tunnel-*`, `lock` | Sockets and protection against concurrent changes |
 
-`fastgpu config` displays the settings. You can edit the JSON while no operation is running. Defaults are 24 GB VRAM, 32 GB system RAM, host CUDA 13.0 or newer, a 40 GB container disk, a 16,384-token context, and local port 8080. There is no price cap until you set `max_price` or pass `--max-price`.
+`fastgpu config` displays the settings. You can edit the JSON while no operation is running. Defaults are 24 GB VRAM, 32 GB system RAM, host CUDA 13.0 or newer, a 40 GB container disk, a 131,072-token context, and local port 8080. There is no price cap until you set `max_price` or pass `--max-price`.
 
 `up` and `deploy` flags apply to the current invocation; `init` saves the settings it configures. Keep profile paths short enough for SSH Unix socket limits.
 

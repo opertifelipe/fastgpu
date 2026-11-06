@@ -96,6 +96,8 @@ fastgpu doctor
 
 Tests cover volume and offer selection, pagination, reconciliation after uncertain creation, deletion of only the Pod, quoting, locks, and SSE logs. New tests cover persistent paths, GGUF fingerprints, engine validation, readiness aliases, and information output without credential-bearing containers.
 
+Preset tests cover both Qwen and Nanbeige through local HTTP downloads: resuming partial files, servers ignoring Range, checksum failures, and reuse of verified files. Listing tests cover preset aliases, custom paths with spaces and quotes, directory selection, and exclusion of partial files, metadata, and symlinks. Nanbeige has not yet been validated with real GPU inference, long context, thinking, or tool calls; the live results above describe the earlier Qwen validation.
+
 For live testing, create a dedicated Pod with an explicitly selected volume. Check `doctor --remote`, `info --live`, `connect`, an interactive `shell`, a transfer round trip, VS Code, and generation with each affected engine. Run `undeploy` and `down` afterward, then verify that the volume exists and preexisting resources have not changed.
 
 Tests do not automatically authenticate GitHub/Codex and do not certify every GPU, quantization format, model, or option combination. GGUF deployment with vLLM remains experimental and was not exercised in this validation; the checkpoint path was tested for vLLM. No automatic training was performed, as training management is outside the CLI's scope.

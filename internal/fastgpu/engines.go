@@ -70,7 +70,7 @@ func validateDeployment(d Deployment) error {
 	if d.Tokenizer != "" && d.Engine != "vllm" {
 		return fmt.Errorf("--tokenizer requires vLLM")
 	}
-	if d.Engine == "vllm" && !d.HF && d.Tokenizer == "" && (d.Target == ModelAlias || strings.HasSuffix(strings.ToLower(d.Target), ".gguf")) {
+	if d.Engine == "vllm" && !d.HF && d.Tokenizer == "" && (modelPresets[d.Target].File != "" || strings.HasSuffix(strings.ToLower(d.Target), ".gguf")) {
 		return fmt.Errorf("for GGUF with vLLM, specify --tokenizer with a Hugging Face ID or persistent path")
 	}
 	if d.Engine == "ollama" && len(d.Args) != 0 {
@@ -327,11 +327,11 @@ func workerDeploy(ctx context.Context, wanted Deployment) error {
 	if err := validateDeployment(wanted); err != nil {
 		return err
 	}
-	if wanted.Target == ModelAlias {
-		if err := prepareModel(ctx); err != nil {
+	if model, ok := modelPresets[wanted.Target]; ok {
+		if err := prepareModel(ctx, wanted.Target); err != nil {
 			return err
 		}
-		wanted.Target = filepath.Join(modelDir, modelFile)
+		wanted.Target = filepath.Join(modelDir, model.File)
 	}
 	if !wanted.HF {
 		p, err := persistentPath(workspace, wanted.Target)

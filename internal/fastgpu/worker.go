@@ -16,11 +16,6 @@ import (
 	"time"
 )
 
-const ModelAlias = "qwen3.8-27b"
-const modelFile = "Qwen3.8-27B-UD-Q4_K_M.gguf"
-const modelSHA = "322e194ff79741c7baa497c240f677f54b201b0efab44ca8e50f122b39123482"
-const modelSize int64 = 16464440224
-const modelURL = "https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/resolve/4ca720788d1e01f1bff70c033e0d0028fd02e502/" + modelFile
 const modelDir = "/workspace/.gpu/models"
 const deployFile = "/workspace/.gpu/deployment.json"
 
@@ -41,18 +36,18 @@ type Verification struct {
 	SHA256   string `json:"sha256"`
 }
 
-func verifyModel(file string) error {
+func verifyModel(file string, model modelPreset) error {
 	st, err := os.Stat(file)
 	if err != nil {
 		return err
 	}
-	if st.Size() != modelSize {
-		return fmt.Errorf("incorrect GGUF size: %d, expected %d", st.Size(), modelSize)
+	if st.Size() != model.Size {
+		return fmt.Errorf("incorrect GGUF size: %d, expected %d", st.Size(), model.Size)
 	}
 	var cached Verification
 	b, _ := os.ReadFile(file + ".verified.json")
 	_ = json.Unmarshal(b, &cached)
-	if cached.Size == st.Size() && cached.Modified == st.ModTime().UnixNano() && cached.SHA256 == modelSHA {
+	if cached.Size == st.Size() && cached.Modified == st.ModTime().UnixNano() && cached.SHA256 == model.SHA256 {
 		return nil
 	}
 	f, err := os.Open(file)
@@ -64,20 +59,28 @@ func verifyModel(file string) error {
 	if _, err = io.Copy(h, f); err != nil {
 		return err
 	}
-	if hex.EncodeToString(h.Sum(nil)) != modelSHA {
+	if hex.EncodeToString(h.Sum(nil)) != model.SHA256 {
 		return fmt.Errorf("invalid GGUF checksum: %s", file)
 	}
-	return atomicJSON(file+".verified.json", Verification{st.Size(), st.ModTime().UnixNano(), modelSHA})
+	return atomicJSON(file+".verified.json", Verification{st.Size(), st.ModTime().UnixNano(), model.SHA256})
 }
 
-func prepareModel(ctx context.Context) error {
+func prepareModel(ctx context.Context, alias string) error {
+	model, ok := modelPresets[alias]
+	if !ok {
+		return fmt.Errorf("supported models: %s", strings.Join(presetAliases(), ", "))
+	}
 	if _, err := os.Stat("/run/gpu/ready"); err != nil {
 		return fmt.Errorf("fastgpu environment is not initialized")
 	}
-	if err := os.MkdirAll(modelDir, 0755); err != nil {
+	return downloadModel(ctx, modelDir, model)
+}
+
+func downloadModel(ctx context.Context, dir string, model modelPreset) error {
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
-	l, err := os.OpenFile(filepath.Join(modelDir, "download.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	l, err := os.OpenFile(filepath.Join(dir, "download.lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return err
 	}
@@ -86,9 +89,9 @@ func prepareModel(ctx context.Context) error {
 		return fmt.Errorf("a model download is already in progress")
 	}
 	defer syscall.Flock(int(l.Fd()), syscall.LOCK_UN)
-	dest := filepath.Join(modelDir, modelFile)
+	dest := filepath.Join(dir, model.File)
 	if _, err = os.Stat(dest); err == nil {
-		if err = verifyModel(dest); err != nil {
+		if err = verifyModel(dest, model); err != nil {
 			return err
 		}
 		fmt.Println("GGUF already present and verified")
@@ -106,18 +109,18 @@ func prepareModel(ctx context.Context) error {
 		return err
 	}
 	offset := st.Size()
-	if offset > modelSize {
+	if offset > model.Size {
 		return fmt.Errorf("partial download is larger than the model: move it before retrying")
 	}
 	var stat syscall.Statfs_t
-	if err = syscall.Statfs(modelDir, &stat); err != nil {
+	if err = syscall.Statfs(dir, &stat); err != nil {
 		return err
 	}
-	if int64(stat.Bavail)*int64(stat.Bsize) < modelSize-offset+(1<<30) {
-		return fmt.Errorf("insufficient volume space: at least %.1f GB of free space required", float64(modelSize-offset+(1<<30))/1e9)
+	if int64(stat.Bavail)*int64(stat.Bsize) < model.Size-offset+(1<<30) {
+		return fmt.Errorf("insufficient volume space: at least %.1f GB of free space required", float64(model.Size-offset+(1<<30))/1e9)
 	}
-	if offset < modelSize {
-		req, err := http.NewRequestWithContext(ctx, "GET", modelURL, nil)
+	if offset < model.Size {
+		req, err := http.NewRequestWithContext(ctx, "GET", model.URL, nil)
 		if err != nil {
 			return err
 		}
@@ -148,7 +151,7 @@ func prepareModel(ctx context.Context) error {
 		}
 		buf := make([]byte, 256*1024)
 		last := time.Now()
-		read := io.LimitReader(resp.Body, modelSize-offset+1)
+		read := io.LimitReader(resp.Body, model.Size-offset+1)
 		for {
 			n, e := read.Read(buf)
 			if n > 0 {
@@ -158,7 +161,7 @@ func prepareModel(ctx context.Context) error {
 				offset += int64(n)
 			}
 			if time.Since(last) > 5*time.Second {
-				fmt.Fprintf(os.Stderr, "GGUF: %.1f / %.1f GB\n", float64(offset)/1e9, float64(modelSize)/1e9)
+				fmt.Fprintf(os.Stderr, "GGUF: %.1f / %.1f GB\n", float64(offset)/1e9, float64(model.Size)/1e9)
 				last = time.Now()
 			}
 			if e == io.EOF {
@@ -175,7 +178,7 @@ func prepareModel(ctx context.Context) error {
 	if err = f.Close(); err != nil {
 		return err
 	}
-	if err = verifyModel(dest + ".partial"); err != nil {
+	if err = verifyModel(dest+".partial", model); err != nil {
 		return err
 	}
 	if err = os.Rename(dest+".partial", dest); err != nil {

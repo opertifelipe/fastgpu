@@ -39,6 +39,13 @@ The Qwen preset uses:
 - File: `Qwen3.8-27B-UD-Q4_K_M.gguf`, 16,464,440,224 bytes.
 - SHA-256: `322e194ff79741c7baa497c240f677f54b201b0efab44ca8e50f122b39123482`.
 
+The Nanbeige preset (`nanbeige4.3-33b`) uses:
+
+- Repository: `bartowski/Nanbeige_Nanbeige4.3-33B-GGUF`.
+- Revision: `9beb68421fdf7be095093a6888325fa2c83ddd38`.
+- File: `Nanbeige_Nanbeige4.3-33B-Q4_K_M.gguf`, 20,788,825,216 bytes.
+- SHA-256: `2cef79855ca47ee6571e166db32a07089e34f3cf78e0397b262d124ddb814c37`.
+
 Partial downloads resume through HTTP Range and are renamed after verification. Custom GGUF verification is cached using size and modification time. Checkpoints are identified by file metadata; Hugging Face IDs require an explicit revision to pin the weights.
 
 These caches assume trusted processes on the volume. They do not defend against deliberate changes to files and metadata. Do not modify weights while they are being served.

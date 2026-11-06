@@ -102,13 +102,35 @@ fastgpu deploy /workspace/models/my-model.gguf --engine vllm --name my-model \
 
 If the model also requires a separate HF configuration, supply it with `--arg=--hf-config-path --arg=/workspace/models/configuration`. Check that your vLLM version and GPU support the architecture and quantization. If they do not, use the HF checkpoint or a supported GGUF with llama.cpp/Ollama.
 
-## Qwen preset
+## Included presets
 
 ```sh
 fastgpu deploy qwen3.8-27b
+fastgpu deploy nanbeige4.3-33b
 ```
 
-The preset prepares the Unsloth `Qwen3.8-27B-UD-Q4_K_M.gguf` on the volume and uses llama.cpp by default. Its revision and checksum are pinned; later deployments reuse the file. Other engines still have their own format, template, and tokenizer requirements.
+| Deploy alias | GGUF | Download size |
+| --- | --- | --- |
+| `qwen3.8-27b` | Unsloth `Qwen3.8-27B-UD-Q4_K_M.gguf` | 16.46 GB |
+| `nanbeige4.3-33b` | Bartowski `Nanbeige_Nanbeige4.3-33B-Q4_K_M.gguf` | 20.79 GB |
+
+Each preset downloads to `/workspace/.gpu/models` if absent, verifies its pinned size and SHA-256, and uses llama.cpp by default. Later deployments reuse the file. `fastgpu up` and `fastgpu deploy` without a model still select Qwen. Other engines have their own format, template, and tokenizer requirements.
+
+The default context is 131,072 tokens unless overridden by the saved profile or `--context`. Nanbeige's [configuration](https://huggingface.co/Nanbeige/Nanbeige4.3-33B/blob/main/config.json) implies about 26 GiB of FP16 KV cache at that context, in addition to the weights and runtime buffers. A 24 GB GPU is insufficient for full GPU offload at 128k with that cache; choose a larger GPU or suitable cache settings. `--min-vram` only affects creation of a new Pod. Nanbeige generation and tool calling still require validation on the selected GPU and image.
+
+Both the local CLI and the worker in the Docker image must contain the new preset and listing commands. Rebuild the client and image when upgrading from a build that only supports Qwen; see [image builds](IMAGE.md).
+
+## List installed GGUFs
+
+```sh
+fastgpu model list
+fastgpu model list /workspace/models
+fastgpu model list home:checkpoints
+```
+
+With no directory, the command searches `/workspace/.gpu/models`. An explicit directory selects another location on the volume. Subdirectories are included; symlinks, partial downloads, and verification metadata are excluded. A reachable Pod is required.
+
+The `DEPLOY TARGET` column shows the short alias for presets in the managed directory and a shell-quoted absolute path for other GGUFs. Copy that value after `fastgpu deploy`. The listing covers GGUF files; checkpoint directories and Ollama's imported blob store are separate storage formats.
 
 ## Endpoints and engine changes
 

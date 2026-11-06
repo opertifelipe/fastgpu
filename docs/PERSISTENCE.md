@@ -73,7 +73,7 @@ Start the script inside tmux and detach using tmux's key sequence. The Pod remai
 
 ## Models and caches
 
-The Qwen preset has a pinned URL, revision, and SHA-256. Downloads use a resumable `.partial` file and are renamed after verification. Later deployments reuse the existing GGUF.
+The Qwen and Nanbeige presets have pinned URLs, revisions, and SHA-256 checksums. Downloads use a resumable `.partial` file and are renamed after verification. Later deployments reuse the existing GGUF.
 
 For your own GGUF, `fastgpu deploy /workspace/models/my-model.gguf` reads that file directly and caches its verification result. It does not download or copy it. Finish saving before deployment; if the file changes, run a new deploy to apply the new version.
 

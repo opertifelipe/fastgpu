@@ -111,6 +111,7 @@ fastgpu deploy /workspace/models/my-model.gguf --name my-model
 fastgpu deploy /workspace/models/my-model.gguf --engine ollama --name my-model
 fastgpu deploy /home/gpu/checkpoints/experiment --engine vllm --name my-model
 fastgpu deploy qwen3.8-27b
+fastgpu deploy nanbeige4.3-33b
 ```
 
 | Option | Purpose |
@@ -132,7 +133,9 @@ See [models](MODELS.md) for format selection and complete examples.
 
 ```sh
 fastgpu model pull qwen3.8-27b
+fastgpu model pull nanbeige4.3-33b
 fastgpu model list
+fastgpu model list /workspace/models
 fastgpu logs
 fastgpu logs --follow
 fastgpu logs --pod
@@ -141,7 +144,9 @@ fastgpu tunnel --local-port 8081
 fastgpu undeploy
 ```
 
-`model pull` prepares the included preset. `model list` lists the managed GGUF directory. Custom models may live elsewhere on the volume and are selected by path.
+`model pull [MODEL]` downloads and verifies a preset on the selected Pod; omitting the model selects Qwen. Supported presets are `qwen3.8-27b` and `nanbeige4.3-33b`.
+
+`model list [DIRECTORY]` recursively lists GGUF files in the managed directory by default, or in the supplied directory on the volume (`home:` and `vol:` are supported). The `DEPLOY TARGET` column contains the preset alias or quoted absolute path to pass to `fastgpu deploy`. Partial downloads, verification metadata, and symlinks are excluded. Listing requires a reachable Pod.
 
 `logs --pod` reads provider events, which is useful before SSH is ready; it stays open until Ctrl-C. Other logs belong to the inference service. Tunnels use background OpenSSH processes: closing a tunnel does not stop the service or Pod. `undeploy` stops the service and closes its tunnel, but the GPU remains billable.
 
