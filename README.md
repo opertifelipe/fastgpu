@@ -1,5 +1,3 @@
-# fastgpu
-
 <img src="logo/fastgpu-logo.svg" alt="fastgpu logo" width="420">
 
 A Rust CLI for using a RunPod GPU as a remote development environment: persistent projects and models, SSH, local VS Code, file transfers, and inference through **llama.cpp, Ollama, or vLLM**.
