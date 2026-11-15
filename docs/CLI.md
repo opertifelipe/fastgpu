@@ -697,6 +697,8 @@ The final image contains the compiled worker, not the Rust compiler. Project-spe
 
 Startup requires a mounted `/workspace` and `PUBLIC_KEY`; `up` supplies them. It initializes the managed `.gpu` namespace, checks its format and write access, establishes the persistent home, prepares SSH keys, obtains a workspace lock, and starts Supervisor. The user is `gpu` (UID/GID 2000). Startup does not recursively change ownership of user data. Some volumes remap ownership; sharing storage is not a user-isolation mechanism.
 
+Codex includes the distribution's `bubblewrap` package. Its `~/.codex/app-server-control` directory points to `/run/gpu/codex-app-server-control`, owned by `gpu` with mode `0700`, so daemon startup works when the Network Volume reports permissive directory modes. An existing directory is preserved inside `~/.codex/app-server-control.backup.XXXXXX` before replacement with the symlink. Configuration and sessions remain on the persistent volume; the socket directory is recreated at container startup.
+
 Supervisor starts SSH automatically. Inference starts through `deploy`, including after a new Pod is created from an existing volume. Inference logs rotate at 20 MB with three backups. `HF_HOME`, `TORCH_HOME`, `UV_CACHE_DIR`, and `OLLAMA_MODELS` point to persistent locations. `VLLM_USE_FLASHINFER_SAMPLER=0` is an image setting; it does not disable GPU inference.
 
 ### Upgrading the image

@@ -48,6 +48,15 @@ export OLLAMA_MODELS=/workspace/.gpu/ollama/models
 PROFILE
 mkdir -p /run/gpu /run/sshd
 chown gpu:gpu /run/gpu
+# Codex requires a private socket directory; Network Volumes may report mode 0777.
+install -d -o gpu -g gpu -m 700 /run/gpu/codex-app-server-control
+codex_home="$state/home/.codex"
+runuser -u gpu -- mkdir -p "$codex_home"
+if [[ -e "$codex_home/app-server-control" && ! -L "$codex_home/app-server-control" ]]; then
+    backup=$(runuser -u gpu -- mktemp -d "$codex_home/app-server-control.backup.XXXXXX")
+    runuser -u gpu -- mv -- "$codex_home/app-server-control" "$backup/"
+fi
+runuser -u gpu -- ln -sfnT /run/gpu/codex-app-server-control "$codex_home/app-server-control"
 pod_identity=${RUNPOD_POD_ID:-${GPU_WORKSPACE_ID:-local}}
 [[ "$pod_identity" =~ ^[A-Za-z0-9_-]+$ ]] || { echo 'Invalid Pod identity' >&2; exit 1; }
 hostkeys="$state/hostkeys/$pod_identity"
