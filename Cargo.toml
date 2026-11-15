@@ -1,0 +1,28 @@
+[package]
+name = "fastgpu"
+version = "0.3.0"
+edition = "2024"
+rust-version = "1.91"
+description = "Your remote GPU environment on RunPod"
+license = "GPL-3.0-only"
+repository = "https://github.com/opertifelipe/gpu-extension"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4.5", features = ["derive"] }
+fs2 = "0.4"
+libc = "0.2"
+rand = "0.9"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "process", "time", "io-util", "net"] }
+toml = "0.9"
+walkdir = "2"
+
+[profile.release]
+lto = "thin"
+strip = true

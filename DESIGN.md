@@ -8,7 +8,7 @@ Users run training with their preferred tools. The client manages infrastructure
 
 ## Language
 
-Go provides a single executable without an additional runtime, HTTP APIs, signal handling, and process management with a small implementation. OpenSSH and rsync handle authentication, terminals, tunnels, and transfers. Rust would also suit this kind of client; Go keeps this project's implementation straightforward.
+Rust provides one executable for the local client and remote worker without a language runtime installation. Clap defines commands and flags, Serde preserves the JSON configuration and manifests, Reqwest/rustls handles HTTP, and Tokio coordinates subprocesses, signals, and timeouts. OpenSSH and rsync handle authentication, terminals, tunnels, and transfers. Cargo and the committed lockfile define the build for both the CLI and the Docker image.
 
 ## Image and data separation
 
@@ -32,4 +32,4 @@ Repeated startup reports and reuses the selected Pod. Before creating a Pod, the
 
 ## Future extensions
 
-Extension points include engine definitions, Docker installation scripts, and profile configuration. Continuous synchronization, autonomous shutdown, S3 transfers, and training management are outside the current implementation. Start with the [README](README.md) and see [architecture](docs/ARCHITECTURE.md) for details.
+Extension points include engine definitions, Docker installation scripts, and profile configuration. Continuous synchronization, autonomous shutdown, S3 transfers, and training management are outside the current implementation. Start with the [README](README.md) and see [architecture](docs/CLI.md) for details.

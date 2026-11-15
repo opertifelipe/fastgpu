@@ -1,12 +1,12 @@
 # fastgpu
 
-A Go CLI that turns a RunPod GPU machine into an extension of your local computer: SSH, VS Code, persistent repositories and models, file transfers, and inference with **llama.cpp, Ollama, or vLLM**.
+A Rust CLI that turns a RunPod GPU machine into an extension of your local computer: SSH, VS Code, persistent repositories and models, file transfers, and inference with **llama.cpp, Ollama, or vLLM**.
 
 Run training with your own scripts from a terminal or VS Code. Once you save a GGUF file or checkpoint on the volume, `fastgpu deploy` makes it available on localhost through an SSH tunnel.
 
 ## Installation
 
-You need Linux, OpenSSH, and rsync. Building from source also requires Go 1.24 or later and make. For editing, install VS Code locally with the **Remote - SSH** extension.
+You need Linux, OpenSSH, and rsync. Building from source also requires Rust 1.91 or later (with Cargo), a C toolchain, and make. For editing, install VS Code locally with the **Remote - SSH** extension.
 
 From a local copy of the source:
 
@@ -17,9 +17,37 @@ fastgpu --version
 fastgpu --help
 ```
 
-`make install` builds the binary and installs it in `~/.local/bin/fastgpu`. Add the PATH line to `~/.bashrc` or `~/.zshrc` to make it permanent. The compiled binary does not require Go at runtime. See [installation and configuration](docs/INSTALLATION.md) for dependencies, keys, and upgrades.
+`make install` builds the binary and installs it in `~/.local/bin/fastgpu`. Add the PATH line to `~/.bashrc` or `~/.zshrc` to make it permanent. The compiled binary does not require Rust or Cargo at runtime. See [installation and configuration](docs/CLI.md) for dependencies, keys, and upgrades.
 
-The command is now `fastgpu`, avoiding Oh My Zsh's `gpu` Git alias. The published `felipeoperti/fastgpu-workspace:0.2.1` image contains the renamed executable. Existing profiles keep their previous image reference and need an explicit [image upgrade](docs/INSTALLATION.md#upgrade-the-client-and-image) before remote operations. Existing profile and volume paths are retained.
+You can also build a local npm package and install it without publishing anything:
+
+```sh
+make npm-package
+npm install -g ./dist/fastgpu-0.3.0.tgz
+fastgpu --version
+```
+
+The npm package supports Linux x64 with glibc and requires Node.js 22.15+ in the 22.x series, or Node.js 24+. Creating the archive requires the build tools above; installing the archive needs no Rust toolchain. The package is marked private and has no installation scripts or npm dependencies. See [npm packaging](docs/CLI.md) for portability, local testing, and rebuilding from a Docker binary.
+
+Version 0.3.0 uses Rust for both the local CLI and the container worker. Build and publish a matching image using the [image instructions](docs/CLI.md), then select it with `fastgpu init --image YOUR_ACCOUNT/fastgpu-workspace:0.3.0`. The default image reference is `felipeoperti/fastgpu-workspace:0.3.0`; this source migration does not publish that tag. Existing profiles retain their image references and need an explicit [image upgrade](docs/CLI.md) for deployment. Profile JSON, keys, and volume paths remain compatible.
+
+## Uninstallation
+
+If you have a managed Pod and want to terminate it, run `fastgpu down` before uninstalling. The Network Volume is retained and storage billing continues.
+
+For a global npm installation:
+
+```sh
+npm uninstall -g fastgpu
+```
+
+For the default installation created by `make install`:
+
+```sh
+rm "$HOME/.local/bin/fastgpu"
+```
+
+Uninstalling removes the local CLI; it does not terminate Pods, close existing SSH tunnels, or delete the local profile, SSH keys, or Network Volume data. Keep the profile if you plan to reinstall and recover the managed environment. If you installed using both methods, remove both copies; `command -v fastgpu` shows any executable still available on your PATH.
 
 ## Initial setup
 
@@ -29,12 +57,12 @@ Create an API key in your RunPod settings and expose it as `RUNPOD_API_KEY`. Alt
 # Replace this placeholder before running; do not store your key in the repository.
 export RUNPOD_API_KEY='YOUR_RUNPOD_API_KEY'
 fastgpu volumes list
-fastgpu init
+fastgpu init --image YOUR_ACCOUNT/fastgpu-workspace:0.3.0
 fastgpu up --dry-run
 fastgpu up --skip-model
 ```
 
-`init` asks which Network Volume to use when several are available and generates a dedicated SSH key. You can set `--volume ID_OR_NAME`, `--ssh-key PATH`, and `--image IMAGE`. If you have no volumes, create one with `fastgpu volumes create`, choosing its size and data center explicitly.
+Replace `YOUR_ACCOUNT/fastgpu-workspace:0.3.0` with the matching image you published. `init` asks which Network Volume to use when several are available and generates a dedicated SSH key. You can set `--volume ID_OR_NAME`, `--ssh-key PATH`, and `--image IMAGE`. If you have no volumes, create one with `fastgpu volumes create`, choosing its size and data center explicitly.
 
 `fastgpu` without arguments starts the default `small` environment, just like `fastgpu up`. Choose a size with `fastgpu up --small`, `--medium`, `--large`, or `--xlarge`. The CLI selects compatible **On-Demand** NVIDIA GPUs available in the volume's data center: small below $1.50/h, medium from $1.50 to below $3.50/h (closest to $3/h), large from $3.50 to $5/h, and xlarge above $5/h. Except for medium, it chooses the cheapest offer in the size's range. If none is available, startup fails. Use `--max-price` to cap compute cost in USD/hour. Storage is billed separately. Running `up` without `--skip-model` also prepares the Qwen preset, a download of about 16.5 GB.
 
@@ -67,7 +95,7 @@ fastgpu shell --cwd home:projects/experiment python train.py
 fastgpu pull home:checkpoints/ ./local-checkpoints
 ```
 
-`fastgpu shell` without arguments opens an interactive SSH session. `fastgpu shell python train.py` runs a script already in the remote home directory; `--cwd` selects another working directory. Inside the shell, you can clone repositories, create uv environments, and run your scripts. Use tmux for long jobs: see [workflow and persistence](docs/PERSISTENCE.md).
+`fastgpu shell` without arguments opens an interactive SSH session. `fastgpu shell python train.py` runs a script already in the remote home directory; `--cwd` selects another working directory. Inside the shell, you can clone repositories, create uv environments, and run your scripts. Use tmux for long jobs: see [workflow and persistence](docs/CLI.md).
 
 `fastgpu code` opens VS Code in the remote home directory. `fastgpu code projects/experiment` opens that project directly.
 
@@ -101,7 +129,7 @@ The included presets are `qwen3.8-27b` and `nanbeige4.3-33b`. Run `fastgpu deplo
 
 `fastgpu model list` shows installed GGUFs in the managed directory, with the alias or quoted path to pass to `deploy`. Use `fastgpu model list /workspace/models` to search another directory on the volume, including its subdirectories.
 
-GGUF with vLLM requires an explicit tokenizer and a compatible model; vLLM's GGUF support is experimental. Use `--arg` for llama.cpp/vLLM options and `--modelfile` for Ollama: see [deployment and customization](docs/MODELS.md).
+GGUF with vLLM requires an explicit tokenizer and a compatible model; vLLM's GGUF support is experimental. Use `--arg` for llama.cpp/vLLM options and `--modelfile` for Ollama: see [deployment and customization](docs/CLI.md).
 
 ## Machine information and connections
 
@@ -143,16 +171,21 @@ fastgpu down
 
 ## Documentation
 
-- [Installation, API keys, SSH keys, and SSH configuration](docs/INSTALLATION.md)
-- [Repositories, caches, checkpoints, and persistence](docs/PERSISTENCE.md)
-- [Custom models and the three inference engines](docs/MODELS.md)
-- [Command reference](docs/CLI.md)
-- [Extending and rebuilding the Docker image](docs/IMAGE.md)
-- [Architecture and limitations](docs/ARCHITECTURE.md)
-- [Validation results](docs/VALIDATION.md)
+- [Complete CLI manual](docs/CLI.md)
+- [Rust lessons and project construction](docs/LEZIONI_RUST.md)
 - [Design decisions](DESIGN.md)
 
 Examples are generic. Local configuration, credentials, Pod state, and working logs are not part of the source tree.
+
+## Development
+
+```sh
+cargo build --locked
+cargo run --locked -- --help
+make test
+```
+
+`make test` checks formatting, runs the Rust tests, and runs Clippy. `Cargo.lock` pins dependency versions. The CLI and worker share the modules in `src/`; no Go toolchain is required.
 
 ## License
 

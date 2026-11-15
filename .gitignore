@@ -14,3 +14,8 @@ id_dsa*
 .ssh/
 .runpod/
 credentials*.json
+/target/
+/npm/bin/
+/node_modules/
+/dist/
+/*.tgz

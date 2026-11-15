@@ -1,0 +1,30 @@
+{
+  "name": "fastgpu",
+  "version": "0.3.0",
+  "private": true,
+  "description": "Your remote GPU environment on RunPod",
+  "license": "GPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/opertifelipe/gpu-extension.git"
+  },
+  "bin": {
+    "fastgpu": "npm/fastgpu.cjs"
+  },
+  "files": [
+    "npm/fastgpu.cjs",
+    "npm/bin/fastgpu",
+    "docs/",
+    "DESIGN.md"
+  ],
+  "os": ["linux"],
+  "cpu": ["x64"],
+  "libc": ["glibc"],
+  "engines": {
+    "node": "^22.15.0 || >=24.0.0"
+  },
+  "scripts": {
+    "prepack": "node scripts/build-npm.cjs",
+    "test": "node --test tests/npm.test.cjs tests/npm-package.test.cjs"
+  }
+}
