@@ -14,6 +14,7 @@
   "files": [
     "npm/fastgpu.cjs",
     "npm/bin/fastgpu",
+    "logo/fastgpu-logo.svg",
     "docs/",
     "DESIGN.md"
   ],

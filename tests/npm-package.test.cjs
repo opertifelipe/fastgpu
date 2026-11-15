@@ -20,6 +20,7 @@ test('tarball installs offline without Cargo or installation scripts', { timeout
   const expected = [
     'package.json', 'README.md', 'LICENSE', 'DESIGN.md',
     'npm/fastgpu.cjs', 'npm/bin/fastgpu',
+    'logo/fastgpu-logo.svg',
     ...readdirSync(join(root, 'docs')).filter(name => name.endsWith('.md')).map(name => `docs/${name}`),
   ];
   assert.deepEqual(archive.files.map(file => file.path).sort(), expected.sort());

@@ -1,72 +1,90 @@
-# Manuale completo della CLI fastgpu
+# fastgpu CLI reference
 
-Questa guida descrive la versione 0.3.0. I comandi si eseguono sul computer locale, salvo indicazione diversa. I blocchi seguenti conservano il riferimento tecnico originale in inglese. Per imparare a costruire il progetto, vedi [Lezioni di Rust](LEZIONI_RUST.md).
+This manual describes the **0.3.0 Rust CLI** and the commands implemented in [src/cli.rs](../src/cli.rs). Commands run on your local computer unless marked as container internals. Names such as `POD_ID`, `ID_OR_NAME`, and `DATA_CENTER_ID` are placeholders to replace.
 
+For a short introduction, use the [README](../README.md). For Rust lessons, implementation details, SSH internals, and public npm distribution, use [the development course](how-to.md).
 
-## Installazione e configurazione
+## Contents
 
+- [Installation](#installation)
+- [Credentials and first setup](#credentials-and-first-setup)
+- [Configuration and state](#configuration-and-state)
+- [Command overview](#command-overview)
+- [Help and configuration commands](#help-and-configuration-commands)
+- [Pod lifecycle](#pod-lifecycle)
+- [Connections and remote files](#connections-and-remote-files)
+- [Models and inference](#models-and-inference)
+- [Diagnostics](#diagnostics)
+- [Network Volumes](#network-volumes)
+- [Remote project workflow](#remote-project-workflow)
+- [Container image](#container-image)
+- [Internal worker commands](#internal-worker-commands)
+- [Troubleshooting](#troubleshooting)
+- [Validation and current limits](#validation-and-current-limits)
 
-## Local requirements
+## Installation
 
-- Linux x86-64 for the supplied GPU image. The Rust client can be built for other Linux architectures, but these have not all been tested.
-- OpenSSH client, `ssh-keygen`, and rsync.
-- Rust 1.91 or later with Cargo, a C toolchain, and make to build from source.
-- VS Code with Remote - SSH if you use `fastgpu code`.
-- A RunPod account, available credit, and access to the Pod and Network Volume APIs.
+### Native build
 
-On Ubuntu/Debian, install the system tools with:
+Use Linux, Rust 1.91 or newer with Cargo, a C toolchain, and make. Remote operations need OpenSSH and rsync. On Ubuntu/Debian, the relevant system packages are:
 
 ```sh
 sudo apt-get update
 sudo apt-get install -y openssh-client rsync make build-essential
 ```
 
-Install Rust and Cargo using the [official instructions](https://www.rust-lang.org/tools/install). Install the development checks with `rustup component add rustfmt clippy`. A C compiler and linker are needed for the build, including the TLS cryptography dependency. The compiled client needs no Rust runtime or OpenSSL installation; HTTPS uses rustls. Docker is needed to rebuild the image, not to use the client.
-
-## Build and install
-
-From the project directory:
+Install Rust using [the official instructions](https://www.rust-lang.org/tools/install). From the checkout:
 
 ```sh
+rustup component add rustfmt clippy
+make build
+./bin/fastgpu --version
 make install
 export PATH="$HOME/.local/bin:$PATH"
-fastgpu --version
-fastgpu --help
 ```
 
-The binary is installed in `~/.local/bin/fastgpu`. To select Cargo, use `make install CARGO=/path/to/cargo`. To build only `bin/fastgpu`, run `make build`; this runs `cargo build --release --locked`. For a debug build, use `cargo build --locked`. Run `make test` for formatting, Rust tests, and Clippy. Add the PATH export to your shell configuration.
+`make build` builds with `cargo build --release --locked --target-dir target` and copies the result to `bin/fastgpu`. `make install` installs it in `~/.local/bin/fastgpu`. Add the PATH export to your shell configuration. `CARGO=/path/to/cargo` overrides Cargo; `DESTDIR` supplies an installation staging prefix.
 
-You need a local copy of the source. Publishing it on GitHub is not required to build or use the CLI.
+The executable uses the system C library and rustls for HTTPS. It needs no Rust runtime or OpenSSL installation. The current implementation uses Unix-specific APIs; Windows support is not implemented. The supplied GPU image and npm archive target Linux x86-64.
 
-## Install a local npm package
+### npm archive
 
-On Linux x64 with glibc, use Node.js 22.15+ in the 22.x series or Node.js 24+ and npm:
+The current package is named `fastgpu`, version `0.3.0`, and has `private: true`. This prevents npm registry publication; it does not prevent local archive installation.
 
 ```sh
 make npm-package
 npm install -g ./dist/fastgpu-0.3.0.tgz
+command -v fastgpu
 fastgpu --version
 ```
 
-`make npm-package` builds and packages the Rust executable in `dist/`. If you already have the `.tgz`, only the npm installation step is needed; it does not compile or download a binary. OpenSSH and rsync remain system dependencies. No registry publication is needed, and `package.json` is marked private.
+Creating the archive requires Cargo, make, a C toolchain, Node.js, and npm. Installing an existing `.tgz` needs Node/npm but no compiler. Supported Node versions are 22.15+ within 22.x, or 24+. The package supports Linux x64 with glibc, contains the executable, launcher, logo, license, and documentation, and has no npm dependencies or installation scripts.
 
-The executable is installed under npm's global prefix, which you can inspect with `npm prefix -g`. Use `command -v fastgpu` to check which installation your shell selects if you previously installed with `make install`. See [npm packaging](CLI.md) for binary compatibility and package validation.
+`npm prefix -g` identifies the installation prefix. If another installation occurs earlier on PATH, your shell may run that copy instead. The [course](how-to.md#30-npm-files-and-lifecycle) explains the launcher and packaging hooks.
 
-## RunPod API key
+### Portable build baseline
 
-Generate an API key in your RunPod account settings. Grant access to the operations you need: reading the catalog, Pods, and volumes; creating and managing Pods; and volume write permissions if you plan to create or modify storage.
-
-The client checks, in order:
-
-1. `RUNPOD_API_KEY` in the local environment;
-2. `apikey` in `~/.runpod/config.toml`, if runpodctl is configured.
+A locally compiled executable inherits its build system's glibc requirements. Do not assume that an Ubuntu-built binary runs on every older Linux distribution. The Docker CLI stage uses Debian Bookworm and can supply the archive's executable:
 
 ```sh
-export RUNPOD_API_KEY='YOUR_RUNPOD_API_KEY'
-fastgpu volumes list
+docker build --target cli -f docker/Dockerfile -t fastgpu-cli-npm .
+mkdir -p .local/npm-build
+package_container=$(docker create fastgpu-cli-npm)
+docker cp "$package_container":/fastgpu .local/npm-build/fastgpu
+docker rm "$package_container"
+FASTGPU_NPM_BINARY="$PWD/.local/npm-build/fastgpu" make npm-package
 ```
 
-Replace the placeholder. To avoid putting the key in shell history, enter it interactively in Bash:
+`FASTGPU_NPM_BINARY` skips compilation in the packaging hook, but that hook still needs Cargo to inspect package metadata. It verifies the package/Cargo/binary versions, Linux x64 ELF header, and executable permissions. It does not prove compatibility with every distribution. Test the archive on the platforms you intend to support; see [validation](#validation-and-current-limits).
+
+## Credentials and first setup
+
+The API key is read in this order:
+
+1. A nonempty `RUNPOD_API_KEY` environment variable.
+2. The `apikey` value in `~/.runpod/config.toml`.
+
+The CLI does not have a login command. The key is not stored in the fastgpu profile or sent to the Pod. In Bash, enter it without recording the value in command history:
 
 ```bash
 read -rs -p 'RunPod API key: ' RUNPOD_API_KEY
@@ -74,919 +92,694 @@ printf '\n'
 export RUNPOD_API_KEY
 ```
 
-The API key stays on your local computer. It is not saved in `config.json`, printed by help, or sent to the Pod. Keep it out of source files and files copied to the remote project. Protect the fallback TOML file because it contains the secret.
-
-## Volume and image
+Use RunPod credentials with access to the operations you intend to perform. Volume mutations require the corresponding write permissions. Keep keys out of project files, examples, and transferred data.
 
 ```sh
 fastgpu volumes list
-fastgpu init --image YOUR_ACCOUNT/fastgpu-workspace:0.3.0
-fastgpu up --dry-run
+fastgpu init --volume ID_OR_NAME --image felipeoperti/fastgpu-workspace:0.3.0
+fastgpu up --small --dry-run
+fastgpu up --small --skip-model
 ```
 
-When several volumes are available, the first `init` asks which one to select. The saved selection is reused. Use an ID if names are duplicated.
+A Network Volume must already exist. If necessary, create one explicitly with [volumes create](#fastgpu-volumes-create). With multiple volumes and no saved or explicit selection, `init`/`up` prompt only in an interactive terminal; otherwise they fail instead of guessing.
 
-To select these explicitly:
+`init` generates a dedicated Ed25519 key pair if its selected key path does not exist. By default these files are `id_ed25519` and `id_ed25519.pub` in the profile. The generated key has no passphrase. An existing private key must also have its `.pub` file. For a passphrase-protected key, load it into `ssh-agent` first; automatic connections use batch mode. The agent is not forwarded to the Pod.
 
-```sh
-fastgpu init --volume ID_OR_NAME --image YOUR_ACCOUNT/fastgpu-workspace:0.3.0
-```
+## Configuration and state
 
-The default image reference is `felipeoperti/fastgpu-workspace:0.3.0`. This migration prepares its Rust build but does not publish the image. [Build and publish your own matching image](CLI.md), replace `YOUR_ACCOUNT` in the examples, and select it with `--image`. Existing images from 0.2.1 contain the previous client and do not meet the 0.3.0 deployment version check.
+### Profile location
 
-The image includes Ubuntu/CUDA, Python, uv, vLLM, llama.cpp, Ollama, GitHub CLI, Codex CLI, SSH, rsync, and tmux. For a private image, register a credential in RunPod and pass `--registry CREDENTIAL_ID`; the client stores only its ID.
+The profile directory is selected in this order:
 
-Storage must be a **Network Volume** in the same data center as the Pod. A container disk or Pod volume disk does not provide the persistence after termination required by this project.
+1. Nonempty `GPU_CONFIG_DIR`.
+2. `$XDG_CONFIG_HOME/gpu` when `XDG_CONFIG_HOME` is set.
+3. `~/.config/gpu`.
 
-## SSH key and direct access
-
-`fastgpu init` generates a dedicated Ed25519 key pair, normally at:
-
-```text
-~/.config/gpu/id_ed25519
-~/.config/gpu/id_ed25519.pub
-```
-
-The generated key has no passphrase. To use an existing key instead:
-
-```sh
-fastgpu init --ssh-key ~/.ssh/id_ed25519
-```
-
-Both the private key and its `.pub` file must exist. Load passphrase-protected keys into `ssh-agent` with `ssh-add` before running commands: automatic operations use SSH in batch mode. The agent is not forwarded to the Pod.
-
-During `up`, only the **public** key is sent to the image. The server allows the **`gpu`** user, exposes `22/tcp`, and uses key authentication. The CLI queries RunPod for the assigned IP and public port; the external port can change after a restart.
-
-## SSH configuration and VS Code
-
-With VS Code installed locally, install the extension:
-
-```sh
-code --install-extension ms-vscode-remote.remote-ssh
-```
-
-The CLI generates `~/.config/gpu/ssh_config` with an alias named `gpu-POD_ID`, the local private key, the Pod's IP/port, and a dedicated `known_hosts` file. To get commands ready to copy:
-
-```sh
-fastgpu connect
-fastgpu connect --json
-fastgpu shell
-```
-
-`fastgpu code DIRECTORY` adds a line like this at the beginning of `~/.ssh/config` if it is missing:
-
-```sshconfig
-Include "/home/USER/.config/gpu/ssh_config"
-```
-
-The actual path is generated automatically and existing SSH configuration is preserved. Other commands use the dedicated file directly through `ssh -F`, so they do not require manual edits to the global SSH configuration.
-
-The RunPod dashboard may show SSH commands using `root`. For this image, use `fastgpu connect`, which selects `gpu`. Transfers and tunnels use direct SSH over TCP. The provider's SSH proxy has different capabilities and is not the CLI's transport.
-
-The first connection records the host key. Unexpected key changes for the same Pod are rejected; verify the server's identity before editing `known_hosts`.
-
-## Persistent local configuration
-
-The profile directory is `$XDG_CONFIG_HOME/gpu`, normally `~/.config/gpu`. To use an independent profile:
+An independent profile can be selected with:
 
 ```sh
 export GPU_CONFIG_DIR="$HOME/.config/gpu-experiments"
-fastgpu init
+fastgpu config
 ```
 
-The Rust migration retains `GPU_CONFIG_DIR`, the `gpu` profile directory, `gpu-*` Pod names and SSH aliases, the remote `gpu` user, and `/workspace/.gpu`. Existing profiles, keys, Pod references, and volume contents remain usable without a path migration. The executable name is `fastgpu` both locally and inside the image.
+Profiles do not isolate cloud accounts: creation still checks for other non-terminated `gpu-*` Pods in the account. Use a short profile path because SSH control sockets have operating-system path-length limits.
 
-| File | Purpose |
+| File | Contents or purpose |
 | --- | --- |
-| `config.json` | Image, volume, minimum resources, SSH key path, and model settings |
-| `state.json` | Managed Pod ID, volume, and tunnel state |
-| `id_ed25519`, `.pub` | Dedicated SSH identity |
-| `ssh_config`, `known_hosts` | Connection settings and server identities |
-| `tunnel-*`, `lock` | Sockets and protection against concurrent changes |
+| `config.json` | Effective user settings saved by configuration commands |
+| `state.json` | Selected Pod, pending creation name, managed volume, tunnel port |
+| `id_ed25519`, `id_ed25519.pub` | Default dedicated SSH identity |
+| `ssh_config` | Generated connection to the current Pod |
+| `known_hosts` | Recorded SSH server identities |
+| `tunnel-POD_ID` | SSH control socket for the managed tunnel |
+| `lock` | Exclusive lock for cooperating profile mutations |
 
-`fastgpu config` displays the settings. You can edit the JSON while no operation is running. Defaults are 24 GB VRAM, 32 GB system RAM, host CUDA 13.0 or newer, a 40 GB container disk, a 131,072-token context, and local port 8080. There is no price cap until you set `max_price` or pass `--max-price`.
+The `gpu` profile directory, `GPU_CONFIG_DIR`, remote `gpu` user, and `gpu-*` resource names are intentional compatibility names. The executable is `fastgpu`.
 
-`up` and `deploy` flags apply to the current invocation; `init` saves the settings it configures. Keep profile paths short enough for SSH Unix socket limits.
+### Settings and defaults
 
-## Upgrade the client and image
+`fastgpu config` prints effective settings as JSON. You can edit `config.json` while no operation is running. JSON comments are not supported. Missing settings receive these defaults; an existing profile may contain different values.
 
-Rebuild with `make install`, then check that `fastgpu --version` prints `fastgpu version 0.3.0`. This installs `~/.local/bin/fastgpu`. Existing configuration and state files can be read directly by the Rust client; no profile conversion is required.
+| JSON field | Default | Meaning |
+| --- | --- | --- |
+| `image` | `felipeoperti/fastgpu-workspace:0.3.0` | Image for newly created Pods |
+| `registry` | Empty | RunPod registry credential ID, not the credential itself |
+| `volume` | Empty | Saved volume ID/name; otherwise select from account volumes |
+| `ssh_key` | `PROFILE/id_ed25519` | Local private key path |
+| `min_vram_gb` | `24` | Minimum catalog GPU VRAM |
+| `min_ram_gb` | `32` | Minimum system RAM per GPU requested during creation |
+| `min_cuda` | `13.0` | Minimum host CUDA version requested from RunPod |
+| `container_disk_gb` | `40` | Ephemeral container disk size; minimum 20 GB |
+| `max_price` | `0` | Compute-rate cap in USD/hour; nonpositive values disable it |
+| `context_tokens` | `131072` | Context passed to the inference engine |
+| `local_port` | `8080` | Local loopback port for inference |
 
-Build and publish a 0.3.0 image first. Save your work on the volume, terminate the managed Pod with `fastgpu down`, select your image with `fastgpu init --image YOUR_ACCOUNT/fastgpu-workspace:0.3.0`, and recreate the environment with `fastgpu up --skip-model`. A saved profile keeps its image reference until you change it explicitly. Updating the local binary alone does not change the remote image. The inference engines, model weights, and persistent paths retain their existing formats.
+`init` saves image/key/registry/volume settings; `volumes use` saves the volume. Flags on `up` and `deploy` override settings for that invocation and do not persist those configuration changes. Operational state and the remote deployment manifest are saved separately.
 
-New deployments require `fastgpu` inside the image with the same version as the client. This prevents new commands from being sent to an older image. Use a Docker digest rather than a mutable tag to select an exact image build.
+The context default is not an automatic memory-fit calculation. Choose `--context` and compatible hardware for the specific model. `--min-vram` affects new Pod selection, not the resources of an existing Pod.
 
+### Persistent remote layout
 
-## Riferimento dei comandi
+| Path | Purpose |
+| --- | --- |
+| `/workspace` | Mounted Network Volume |
+| `/home/gpu` | Symlink to `/workspace/.gpu/home` |
+| `/workspace/.gpu/models` | Managed GGUF presets and verification caches |
+| `/workspace/.gpu/ollama/models` | Ollama store |
+| `/workspace/.gpu/deployment.json` | Last inference deployment manifest |
+| `/workspace/.gpu/logs` | Inference and Supervisor logs |
+| `/home/gpu/.cache` | Hugging Face, PyTorch, and uv caches |
+| `/workspace/.gpu/hostkeys/POD_ID` | Persistent SSH host identity for each Pod |
 
+The image initializes `progetti`, `checkpoints`, `datasets`, and `.cache` under the home directory. You may create `projects` or any other directories explicitly. Files outside the Network Volume are not retained when the Pod is deleted.
 
-This reference describes the Rust CLI (0.3.0). Commands, flags, profile JSON, and persistent paths are retained from the previous implementation. Run `cargo run --locked -- --help` from source, or `fastgpu --help` after installation.
+## Command overview
 
-## Help and version
+| Command | Main purpose |
+| --- | --- |
+| `fastgpu`, `help`, `--help`, `--version` | Local help/banner or version |
+| `init`, `config` | Save or inspect configuration |
+| `up`, `pods`, `status`, `use` | Create/resume, list, inspect, or adopt a Pod |
+| `stop`, `down`, `recover` | Stop compute, terminate the managed Pod, or resolve uncertain creation state |
+| `shell`, `code` | Remote command/shell or local VS Code on a remote folder |
+| `push`, `pull` | Local-to-remote or remote-to-local copies |
+| `model pull`, `model list` | Prepare presets or list persistent GGUF files |
+| `deploy`, `undeploy` | Start or stop the managed inference service |
+| `tunnel`, `connect` | Manage a model tunnel or print connection commands |
+| `logs`, `doctor`, `cost`, `info` | Diagnostics and resource information |
+| `volumes` | List, show, select, create, rename, resize, or delete Network Volumes |
+
+Every command accepts `-h`/`--help`. The singular `volume` aliases `volumes`. Internal `worker` commands are documented [below](#internal-worker-commands) and hidden from the main help. There is no `mkdir` subcommand; use `shell mkdir -p`.
+
+## Help and configuration commands
+
+### fastgpu help
 
 ```sh
+fastgpu
 fastgpu --help
+fastgpu -h
 fastgpu help deploy
-fastgpu deploy --help
-fastgpu volumes --help
+fastgpu model list --help
 fastgpu --version
 ```
 
-Built-in help is available without an API key and lists options, arguments, and command descriptions. Command and option names match the examples below.
+No arguments shows the root help and ASCII logo, just like requesting root help. It does not load the profile or contact RunPod. `--help` shows detailed command descriptions; `-h` is the compact form. `--version` prints `fastgpu version 0.3.0`. Help/version work without credentials, including when the profile JSON is malformed.
 
-## Configuration
+### fastgpu init
 
-| Command | Purpose |
-| --- | --- |
-| `fastgpu init` | Select the volume, prepare the SSH identity, and save the profile |
-| `fastgpu init --volume ID_OR_NAME` | Select a Network Volume explicitly |
-| `fastgpu init --image IMAGE` | Set the image for new Pods |
-| `fastgpu init --ssh-key PATH` | Use an existing local key with its `.pub` file |
-| `fastgpu init --registry ID` | Select a RunPod registry credential for a private image |
-| `fastgpu config` | Show settings without the API key |
-
-The default profile is `~/.config/gpu`; override it with `XDG_CONFIG_HOME` or `GPU_CONFIG_DIR`. API credentials come from `RUNPOD_API_KEY` or runpodctl's TOML configuration. See [installation](CLI.md) for the full procedure.
-
-## Pods and costs
-
-| Command | Effect |
-| --- | --- |
-| `fastgpu` or `fastgpu up` | Create/resume the Pod (default size: small) and prepare the Qwen preset on the volume |
-| `fastgpu up --small` | Select the cheapest compatible GPU below $1.50/hour |
-| `fastgpu up --medium` | Select the GPU closest to $3/hour, from $1.50 to below $3.50/hour |
-| `fastgpu up --large` | Select the cheapest compatible GPU from $3.50 to $5/hour |
-| `fastgpu up --xlarge` | Select the cheapest compatible GPU above $5/hour |
-| `fastgpu up --skip-model` | Start the environment without preparing Qwen |
-| `fastgpu up --dry-run` | Show the plan without allocating resources |
-| `fastgpu up --max-price 0.90` | Cap compute cost in USD/hour |
-| `fastgpu up --min-vram 48` | Set minimum VRAM for a new Pod |
-| `fastgpu up --image IMAGE --disk 50` | Set the image and container disk for a new Pod |
-| `fastgpu pods` | List account Pods without changing them |
-| `fastgpu use ID` | Recover a `gpu-*` Pod with a Network Volume and a verifiable image |
-| `fastgpu status` | Show remote status and local references |
-| `fastgpu cost` | Show the compute rate and creation time, not the total bill |
-| `fastgpu stop` | Stop the Pod while retaining its identity |
-| `fastgpu down` | Terminate the managed Pod and verify that its volume still exists |
-
-Selection uses Secure Cloud, one NVIDIA GPU, On-Demand billing, and the volume's data center. Catalog pricing is an estimate; the actual rate is checked after creation. If it exceeds `--max-price`, the newly created Pod is terminated and the volume retained. Spot instances are not implemented.
-
-Size flags are mutually exclusive. Selection and capacity retries stay within the chosen price range and any configured `--max-price`; no matching offer causes an error. Medium ranks offers by distance from $3/hour, preferring the cheaper offer on a tie. Other sizes rank by increasing price.
-
-Repeating `up` reports that the Pod already exists and reuses it. An existing Pod keeps its GPU, image, and disk. Run `fastgpu down` before creating a new machine or changing size, keeping your data on the Network Volume. When no Pod is selected locally, creation checks all account Pods and refuses if another non-terminated `gpu-*` Pod exists, including a stopped Pod. Recover that Pod with `fastgpu use ID` when SSH is available, or run `down` from its original profile.
-
-Stopping does not reserve the GPU. Resuming may fail because the host has no free capacity. The CLI does not automatically turn that error into termination. `down` followed by `up` allows a new machine to be selected.
-
-## Machine information
-
-```sh
-fastgpu info
-fastgpu info --live
-fastgpu connect
-fastgpu connect --json
-fastgpu connect --local-port 8888 --remote-port 8888
+```text
+fastgpu init [--image IMAGE] [--ssh-key SSH_KEY] [--registry REGISTRY] [--volume VOLUME]
 ```
 
-`info` shows operational API fields: identity and status, image, cloud/data center, host CUDA, assigned GPU/CPU resources, RAM, disks and mounts, ports, SSH details, runtime metrics, rate, and timestamps. It also includes volume details and persistent paths. Environment variables, startup arguments, and registry credentials are omitted because they may contain secrets.
+Select an existing Network Volume, prepare the SSH identity, and save the local configuration. Requires the RunPod API but creates neither a Pod nor a volume.
 
-CLI help, prompts, messages, and errors are in English. `info` uses the JSON fields `volumes`, `connections`, `persistence`, `note`, and, with `--live`, `remote_system`. Connection output uses `status`, `local_endpoint`, and `local_api` alongside `tcp`, `ssh`, `ssh_config`, and `tunnel_tcp`. Scripts using the former Italian field names must update their lookups.
+| Option | Effect |
+| --- | --- |
+| `--image` | Save a container tag or digest for future Pods |
+| `--ssh-key` | Save the local private key path; require its public companion if the private key exists |
+| `--registry` | Save a RunPod registry credential ID for a private image; an empty value clears it |
+| `--volume` | Resolve an existing volume by ID or unique name; otherwise reuse the saved selector or prompt |
 
-RunPod's `gpu.memory` field is assigned **system RAM**, not VRAM. `--live` reads the GPU name, total/used VRAM, utilization, driver, operating system, and resolved home directory over SSH. Visible CPU counts and kernel memory can describe the host; use API fields for Pod allocations.
+Changing the image does not replace a running Pod. Use the [upgrade procedure](#upgrading-the-image) when the worker version differs.
 
-`connect` prints an `IP:PORT` endpoint, an SSH command with the dedicated identity, a command using `ssh -F`, and a TCP forwarding example. It also reports the local endpoint and, for the managed inference port, the API URL. It does not connect. Tunnel ports are configurable; you must start the remote service listening on the requested port. If the Pod is stopped or its mapping is not ready, no usable SSH command is printed.
+### fastgpu config
 
-## Interactive shell and remote execution
+Print the effective local profile as JSON, including defaults. It requires no API key and does not create the profile directory. It prints the SSH key path, not the key contents, and omits the RunPod API key.
+
+## Pod lifecycle
+
+### fastgpu up
+
+```text
+fastgpu up [--small | --medium | --large | --xlarge]
+           [--volume VOLUME] [--dry-run] [--skip-model]
+           [--max-price USD_PER_HOUR] [--min-vram GB] [--image IMAGE] [--disk GB]
+```
+
+Create one Secure Cloud On-Demand NVIDIA GPU Pod on the selected volume, or reuse the already selected Pod. Creation requests one GPU, at least four vCPUs, and the profile's minimum system RAM. A stopped selected Pod is started before waiting for SSH. After startup, Qwen is prepared unless `--skip-model` is set. Inference and local-project uploads are separate operations.
+
+| Size | Catalog compute-rate band | Selection within compatible offers |
+| --- | --- | --- |
+| `--small` (default) | Greater than $0 and below $1.50/hour | Cheapest |
+| `--medium` | $1.50 to below $3.50/hour | Closest to $3/hour |
+| `--large` | $3.50 through $5/hour | Cheapest |
+| `--xlarge` | Above $5/hour | Cheapest |
+
+These are CLI selection bands, not fixed provider prices or VRAM sizes. Offers must satisfy the volume's data center, minimum VRAM, CUDA request, NVIDIA/architecture filters, and any price cap. The source excludes known unsupported older GPU families. There is no automatic move to another data center or size band when capacity is unavailable.
+
+| Option | Detail |
+| --- | --- |
+| Size flags | Mutually exclusive; affect new Pod selection |
+| `--volume` | Override the saved volume for this invocation; refuse if it differs from the selected Pod's volume |
+| `--dry-run` | Read API data and print a plan or the selected Pod; do not create/start a Pod or download models |
+| `--skip-model` | Skip default Qwen preparation |
+| `--max-price` | Filter catalog rates and check actual new-Pod compute cost; does not cap storage or total spend |
+| `--min-vram` | Minimum GPU VRAM in GB, default from profile |
+| `--image` | Image for a newly created Pod |
+| `--disk` | New Pod's container disk in GB, at least 20 |
+
+An existing Pod keeps its GPU, image, disk, and rate even when these creation flags change. Run `down` before creating a replacement. A dry run may reconcile or clear stale local Pod references and acquire a profile lock; it is not a promise of zero local filesystem changes.
+
+New creation saves an operation name before POST and the Pod ID before waiting for startup. A specific capacity rejection can cause a retry with another offer in the same band. An ambiguous write is not repeated automatically. If the actual new-Pod rate exceeds a positive cap, the client attempts to terminate that newly created Pod.
+
+Startup waits up to 25 minutes for a running Pod with a direct SSH endpoint and `/run/gpu/ready`. An error or interruption can leave billable compute running. Inspect `status`/`pods`, then use `down` if you want to release it.
+
+### fastgpu pods
+
+List all account Pods as JSON, including Pods outside the selected profile. Does not select or modify them. Requires API credentials but no selected Pod.
+
+### fastgpu status
+
+With a selected Pod, print `pod` API details and `local` state as JSON. Without a selected Pod, print only local state and make no API request. Use `info --live` for remote system probes.
+
+### fastgpu use
+
+```sh
+fastgpu use POD_ID
+```
+
+Adopt an existing reachable Pod into this profile. Its name must start with `gpu-`, it must have exactly one Network Volume attachment, and `fastgpu --version` must run through SSH. The command saves the Pod/volume IDs and marks it managed, so subsequent `down` can terminate it. It does not create or restart a Pod, change its image, or change the profile's saved default volume. Worker operations separately require an exact client/worker version match.
+
+### fastgpu stop
+
+Close the managed tunnel and submit RunPod's stop action for the selected managed Pod. Keep local Pod identity so `up` can request a restart. This submits the stop request; it does not wait for the final stopped state. Inspect `status` before restarting if the provider is still transitioning. Restart depends on provider state and available capacity; storage remains separately billable.
+
+### fastgpu down
+
+Terminate the selected managed Pod while retaining its Network Volume. Refuse if the managed flag or expected attachment does not match local state. Close the managed tunnel, request deletion, wait up to two minutes for termination, verify the volume through the API, then clear state.
+
+Container-disk files are lost. Persistent files are retained, but storage continues to incur charges. If the Pod is already absent with a 404 response, local state is cleared; that branch does not recheck the volume. With no selected Pod, the command reports an error instead of choosing another account Pod.
+
+### fastgpu recover
+
+```sh
+fastgpu recover
+fastgpu pods
+# Only after checking the API listing and RunPod console:
+fastgpu recover --clear
+```
+
+Without `--clear`, print local state without an API request. `pending_name` identifies a creation whose result may have been lost. Inspect account resources and the console first: if the Pod exists and is reachable, adopt it with `use POD_ID`.
+
+`--clear` refuses if a Pod is selected, queries account Pods for the pending name, and refuses while a match exists. Otherwise it resets local state. The flag also confirms that you checked manually; the API may not resolve an uncertain creation immediately. This command does not recover deleted files, restart compute, or delete cloud resources.
+
+## Connections and remote files
+
+### Path rules
+
+| Path supplied to fastgpu | Meaning |
+| --- | --- |
+| `projects/demo` or `home:projects/demo` | `/home/gpu/projects/demo`, on the volume |
+| `vol:datasets` | `/workspace/datasets`, on the volume |
+| `/tmp/job` for transfers | Absolute path on the Pod; ephemeral in this example |
+| `/workspace/models/model.gguf` for a model | Absolute persistent remote path |
+
+`code` and `shell --cwd` accept relative paths and `home:`/`vol:` prefixes, not absolute paths. `push`/`pull` additionally accept absolute Pod paths. Model paths additionally accept absolute paths under `/workspace` or `/home/gpu`; the worker resolves them and requires them to remain on the volume. Prefixes take relative suffixes: use `vol:models`, not `vol:/models`.
+
+Newlines, NULs, and lexical escapes outside a prefixed root are rejected. File transfers follow normal remote filesystem permissions and symlink behavior; prefixes do not form a security sandbox. Model containment checks are stricter because files must persist.
+
+### fastgpu shell
+
+```text
+fastgpu shell [--cwd DIRECTORY] [--tty] [COMMAND ...]
+```
+
+Connect as `gpu` to the selected Pod. No command opens an interactive Bash login shell with a terminal. Otherwise run the supplied program, inherit stdin, and propagate its nonzero exit status. The working directory defaults to `home:`. `--tty` requests a terminal for a supplied command.
 
 ```sh
 fastgpu shell
-fastgpu shell python --version
-fastgpu shell python train.py
-fastgpu shell --cwd home:projects/experiment python train.py
-fastgpu shell --tty tmux new-session -A -s training
-fastgpu shell -- bash -lc 'pwd && nvidia-smi'
+fastgpu shell mkdir -p projects/demo
+fastgpu shell --cwd vol:projects/demo python train.py
+fastgpu shell --tty tmux new -A -s work
+fastgpu shell bash -lc 'printf "%s\n" "$HOME"; ls -lh /workspace'
 ```
 
-Without a program, `shell` opens interactive SSH in the persistent home directory. `exit` closes the session. With a program, stdout, stderr, and the exit code are preserved. The program and its files must exist on the Pod.
+Put CLI options before the remote executable; later options belong to the remote program. The CLI quotes arguments rather than expanding them as shell code. For pipelines, redirects, variables, or wildcard expansion, explicitly invoke `bash -lc` and quote the script so the local shell does not expand it first.
 
-Place `fastgpu shell` options before the program: subsequent arguments belong to the remote program. `--tty` allocates a terminal for interactive applications. For pipelines, variables, and redirection, explicitly use `bash -lc` with quoting; unquoted operators are interpreted by your local shell first.
+### fastgpu code
 
-## Files and VS Code
-
-```sh
-fastgpu mkdir projects/demo
-fastgpu code projects/demo
-fastgpu code
-fastgpu push ./demo/ home:projects/demo
-fastgpu push ./my-model.gguf vol:models
-fastgpu pull home:checkpoints/ ./outputs
+```text
+fastgpu code [DIRECTORY]
 ```
 
-Without a path, `code` opens the remote home directory (`/home/gpu`) directly. With a path, it opens that folder directly. VS Code requires Remote - SSH; the CLI prepares an alias and adds an `Include` to `~/.ssh/config` if needed.
+Check that the remote directory exists, then launch local `code --new-window --remote ...`. Default directory: persistent home. Requires local VS Code and the Remote - SSH extension. Install the extension with `code --install-extension ms-vscode-remote.remote-ssh` if needed.
 
-For `mkdir`, `push`, `pull`, `code`, and `shell --cwd`, paths are relative to the home directory or use `home:`/`vol:`. Model deployments also accept absolute paths; use prefixes for transfers. Traversal beyond the selected root and newlines are rejected. Symlinks follow normal filesystem rules: these prefixes are not a sandbox.
+The command adds an `Include` for the profile's generated SSH configuration to `~/.ssh/config`, preserving existing entries. Other fastgpu SSH commands use the profile directly with `ssh -F`. The command does not create the project directory or copy local files.
 
-Transfer destinations are directories. Rsync preserves trailing-slash semantics on the source. It keeps destination-only files but may update existing ones. It excludes `.venv`, `__pycache__`, `.env`, `.env.*`, `*.pem`, and `*.key`; other secrets are not identified by filename.
+### fastgpu push
 
-## Deployment
-
-```sh
-fastgpu deploy /workspace/models/my-model.gguf --name my-model
-fastgpu deploy /workspace/models/my-model.gguf --engine ollama --name my-model
-fastgpu deploy /home/gpu/checkpoints/experiment --engine vllm --name my-model
-fastgpu deploy qwen3.8-27b
-fastgpu deploy nanbeige4.3-33b
+```text
+fastgpu push SOURCE DESTINATION
 ```
 
-| Option | Purpose |
-| --- | --- |
-| `--engine` | `llama.cpp` (default), `ollama`, or `vllm` |
-| `--name` | API model name; otherwise derived from the path |
-| `--context` | Context length, 512–262,144 tokens; requires enough VRAM |
-| `--local-port` | Local tunnel port, default 8080 |
-| `--max-price` | Compute cap for a newly created Pod |
-| `--min-vram` | Minimum VRAM when creating a Pod |
-| `--hf` | Interpret the target as a Hugging Face model ID for vLLM |
-| `--tokenizer` | Hugging Face tokenizer ID or persistent path for vLLM |
-| `--arg` | Additional llama.cpp/vLLM argument; repeatable |
-| `--modelfile` | Remote Modelfile on the volume for Ollama |
-
-`deploy` starts or reuses a Pod, prepares the requested model, stops any previous service, waits for the new service, and opens the tunnel. All engines use the remote loopback interface on port 8080, with one managed service at a time. Training and conversion are not automatic.
-
-See [models](CLI.md) for format selection and complete examples.
+Copy a local file/directory into a remote destination directory. Create that directory if necessary. Requires a selected reachable Pod, SSH, and rsync. It works for both persistent paths and absolute Pod-disk paths.
 
 ```sh
-fastgpu model pull qwen3.8-27b
-fastgpu model pull nanbeige4.3-33b
-fastgpu model list
-fastgpu model list /workspace/models
-fastgpu logs
-fastgpu logs --follow
-fastgpu logs --pod
+fastgpu push ./project/ home:projects/demo
+fastgpu push ./model.gguf vol:models
+fastgpu push ./input.txt /tmp/job
+```
+
+### fastgpu pull
+
+```text
+fastgpu pull SOURCE DESTINATION
+```
+
+Copy a remote file/directory into a local destination directory, creating it if necessary. Requires a reachable Pod even when the source is on the Network Volume. It leaves remote source files in place.
+
+```sh
+fastgpu pull home:checkpoints/ ./results
+fastgpu pull vol:datasets/sample.json ./downloads
+fastgpu pull /tmp/job/output.txt ./results
+```
+
+For both transfer commands:
+
+- The destination is a directory, not a requested replacement filename.
+- `source/` copies directory contents; `source` copies the directory itself.
+- Rsync may update existing same-name files; destination-only files are not deleted.
+- Exclusions are `.venv/`, `__pycache__/`, `.env`, `.env.*`, `*.pem`, and `*.key`. There is no CLI flag to override this list.
+- Transfers use archive behavior without preserving owner/group, protected arguments, and resumable partial files under `.gpu-rsync-partial`.
+- These are explicit one-time copies, not background synchronization. Exclusions do not identify every possible secret filename.
+
+### fastgpu connect
+
+```text
+fastgpu connect [--json] [--local-port PORT] [--remote-port PORT]
+```
+
+Print the TCP endpoint, direct SSH command, alias-based SSH command, forwarding command, and local endpoint. `--json` gives structured output. Local port defaults to the profile setting; remote port defaults to 8080. Both must be 1–65535. For remote port 8080, also report the `/v1` API URL.
+
+The command refreshes the dedicated SSH configuration, but does not execute the printed commands. If direct SSH is unavailable, it reports that status. `connect --local-port 8888 --remote-port 8888` can print a forwarding command for another remote service.
+
+### fastgpu tunnel
+
+```text
+fastgpu tunnel [--local-port PORT]
 fastgpu tunnel --close
-fastgpu tunnel --local-port 8081
-fastgpu undeploy
 ```
 
-`model pull [MODEL]` downloads and verifies a preset on the selected Pod; omitting the model selects Qwen. Supported presets are `qwen3.8-27b` and `nanbeige4.3-33b`.
+Manage a background SSH forward from `127.0.0.1:LOCAL_PORT` to `127.0.0.1:8080` on the Pod. It does not start inference. Local port defaults to the profile; values must be 1–65535. `--local-port` and `--close` cannot be combined.
 
-`model list [DIRECTORY]` recursively lists GGUF files in the managed directory by default, or in the supplied directory on the volume (`home:` and `vol:` are supported). The `DEPLOY TARGET` column contains the preset alias or quoted absolute path to pass to `fastgpu deploy`. Partial downloads, verification metadata, and symlinks are excluded. Listing requires a reachable Pod.
+Reuse a live managed tunnel on the same port. To change ports, close it first. The implementation uses a control socket under the profile, checks for a busy local port, and requests `ExitOnForwardFailure=yes`. `--close` targets only that managed SSH master; it does not terminate arbitrary SSH sessions or stop compute. Loss of a tunnel does not stop the remote model.
 
-`logs --pod` reads provider events, which is useful before SSH is ready; it stays open until Ctrl-C. Other logs belong to the inference service. Tunnels use background OpenSSH processes: closing a tunnel does not stop the service or Pod. `undeploy` stops the service and closes its tunnel, but the GPU remains billable.
+## Models and inference
 
-## Volumes
+### fastgpu model
 
-`fastgpu volumes` and `fastgpu volume` are equivalent.
+With no subcommand, show model help. Model operations use the selected Pod and require a matching worker version. They do not start a Pod automatically.
 
-| Subcommand | Effect |
-| --- | --- |
-| `list` | List all pages of Network Volumes |
-| `show ID_OR_NAME` | Show ID, name, size, data center, and type |
-| `use ID_OR_NAME` | Save the selection; reject a change incompatible with the active Pod |
-| `create NAME --size GB --datacenter DC [--type STANDARD]` | Create 10–4,096 GB of storage |
-| `rename ID_OR_NAME NEW_NAME` | Rename a volume |
-| `resize ID_OR_NAME GB` | Increase capacity; shrinking is not supported |
-| `delete ID_OR_NAME --confirm ID` | Permanently delete unattached, unprotected storage |
-
-Duplicate names require an ID. Choose STANDARD/HIGH_PERFORMANCE when creating a volume. Storage changes may increase costs. There is no special personal volume name: protection covers the configured ID, the managed Pod's volume, and volumes attached to account Pods.
-
-## Diagnostics and recovery
-
-`fastgpu doctor` checks SSH, rsync, and API access; VS Code is optional. `fastgpu doctor --remote` checks installed programs, imports vLLM/PyTorch, and performs a CUDA calculation. It does not authenticate accounts or automatically run generation tests for every engine.
-
-`up` waits up to 25 minutes for the API and SSH. On failure, state remains available to `status`, `logs --pod`, and `down`. Service readiness has a 20-minute wait; Ollama preparation/import also has a timeout. The preset download can take longer.
-
-If a creation POST has an uncertain outcome, the CLI does not repeat it blindly: it reconciles the operation name first. Use `fastgpu recover` to inspect state and `fastgpu pods` to check resources. `recover --clear` removes an uncertain reference only after the API check and the user's manual verification.
-
-A client error, closed terminal, or model failure does not guarantee Pod termination. Check its status and use `down` when finished.
-
-
-## Modelli e inferenza
-
-
-## Workflow
-
-1. Run training with your own tools over SSH or in VS Code.
-2. Save a GGUF file or a complete checkpoint in the persistent home directory or under `/workspace`.
-3. Choose an engine and run `fastgpu deploy` from your local computer.
-4. Call the model at `http://127.0.0.1:8080/v1`.
-
-Deployment paths refer to the **remote machine**. If a GGUF is on your local computer, copy it first with `fastgpu push ./my-model.gguf vol:models`.
-
-## Formats and engines
-
-| Engine | Main input | Customization |
-| --- | --- | --- |
-| llama.cpp | GGUF file | Repeat `--arg` for executable options |
-| Ollama | GGUF or a supported Safetensors directory | `--modelfile` pointing to a file on the volume |
-| vLLM | Hugging Face checkpoint directory or remote model ID | `--arg`, `--tokenizer`, `--hf` |
-| vLLM with GGUF | Supported GGUF and an explicit compatible tokenizer | Experimental, model-dependent support |
-
-Engines differ in supported architectures, quantization formats, and templates. The same file is not automatically compatible with all three. The CLI lets you supply the required settings; training and format conversion remain manual.
-
-## llama.cpp
-
-```sh
-fastgpu deploy /workspace/models/my-model.gguf --engine llama.cpp --name my-model --context 4096
-```
-
-You can also use `home:checkpoints/my-model.gguf`, `vol:models/my-model.gguf`, or `/home/gpu/checkpoints/my-model.gguf`. Unprefixed relative paths are relative to the remote home directory. The resolved path must remain on the Network Volume, including after following symlinks.
-
-By default, the server uses one slot, offloads all layers to the GPU, disables automatic context fitting, and uses the model's Jinja template. To add model-specific options:
-
-```sh
-fastgpu deploy /workspace/models/my-model.gguf --name my-model \
-  --context 4096 --arg=--threads --arg=8
-```
-
-Each `--arg` supplies one argument directly to the process without shell interpretation. Use the `=` form for values starting with `--`. Address, port, primary model path, alias, authentication, and configuration options managed by the CLI cannot be overridden through `--arg`.
-
-`--name` sets the model name in the API. If omitted, the name is derived from the filename, normalized, and stripped of `.gguf`.
-
-## Ollama
-
-Ollama is included in the image. Its server starts when you select this engine:
-
-```sh
-fastgpu deploy /workspace/models/my-model.gguf --engine ollama --name my-model --context 4096
-```
-
-The CLI starts `ollama serve` on the remote loopback interface, imports the model, and checks that it loads. It generates a Modelfile with `FROM` pointing to the target path and `PARAMETER num_ctx` set to the chosen context.
-
-For custom templates, parameters, or adapters, save a Modelfile on the volume:
+### fastgpu model pull
 
 ```text
-FROM /workspace/models/my-model.gguf
+fastgpu model pull [MODEL]
+```
+
+Download and verify a supported preset into `/workspace/.gpu/models`. Default: `qwen3.8-27b`. Other supported preset: `nanbeige4.3-33b`. This is a remote model download, unlike top-level `pull`, which copies files to your computer.
+
+| Preset | GGUF filename | Bytes |
+| --- | --- | ---: |
+| `qwen3.8-27b` | `Qwen3.8-27B-UD-Q4_K_M.gguf` | 16,464,440,224 |
+| `nanbeige4.3-33b` | `Nanbeige_Nanbeige4.3-33B-Q4_K_M.gguf` | 20,788,825,216 |
+
+The repository, pinned revision, and expected SHA-256 are defined in [src/models.rs](../src/models.rs). Downloads resume through HTTP Range into `.partial` files. Size and checksum must match before the final rename. A complete verified file is reused. Downloading requires the remaining model bytes plus approximately 1 GiB of free volume space. A per-directory lock prevents concurrent managed downloads.
+
+Verification metadata caches size, modification time, and expected hash. This assumes trusted processes on the volume. A checksum error on an existing file does not silently overwrite it; inspect or move that file before retrying.
+
+### fastgpu model list
+
+```text
+fastgpu model list [DIRECTORY]
+```
+
+Recursively list complete `.gguf` files from `/workspace/.gpu/models` by default. Accept another persistent directory, such as `vol:models` or `/workspace/models`. Print a deploy alias for managed preset files, or a shell-quoted path for custom files, with size in decimal GB. Skip symlinks and non-GGUF/partial files. The directory must exist. Listing is not a checksum verification or a downloadable-model catalog.
+
+### fastgpu deploy
+
+```text
+fastgpu deploy [MODEL_OR_PATH] [--engine ENGINE] [--name NAME] [--hf]
+               [--tokenizer TOKENIZER] [--modelfile MODELFILE] [--arg VALUE ...]
+               [--min-vram GB] [--context TOKENS] [--local-port PORT]
+               [--max-price USD_PER_HOUR]
+```
+
+Default target: `qwen3.8-27b`; default engine: `llama.cpp`. Validate the request, create/reuse a `small` Pod, check the worker version, and send the deployment manifest through SSH stdin. The worker prepares a preset if needed, verifies persistent inputs, and starts one managed inference service. The client waits for model readiness, opens the local tunnel, and checks readiness through it.
+
+Changing the model, engine, or deployment settings replaces the prior inference service. An identical ready deployment is reused. A failure can leave the Pod running: inspect `logs`, then use `down` when you want to release compute.
+
+| Option | Meaning and constraints |
+| --- | --- |
+| `MODEL_OR_PATH` | Preset alias, remote persistent model file/directory, or Hugging Face ID with `--hf` |
+| `--engine` | `llama.cpp`, `ollama`, or `vllm` |
+| `--name` | Served API alias; default derived from the target filename/ID. Must start with a letter/digit and contain only letters, digits, `.`, `_`, `-`, maximum 96 characters |
+| `--hf` | vLLM only; interpret target as an `organization/model` Hugging Face ID |
+| `--tokenizer` | vLLM only; HF ID or persistent path, required for GGUF |
+| `--modelfile` | Ollama only; persistent remote Modelfile |
+| `--arg` | Repeatable extra llama.cpp/vLLM argument; use long options, e.g. `--arg=--enforce-eager` |
+| `--min-vram` | Minimum VRAM for new Pod selection; does not resize an existing Pod |
+| `--context` | 512–262144 tokens, default from profile; memory must fit |
+| `--local-port` | Local API loopback port, default from profile |
+| `--max-price` | Compute-rate cap for new Pod creation; does not impose a spending limit |
+
+There is no `deploy --small`/`--medium`/`--large` flag. To use another band, explicitly create a Pod with `up` first; deployment reuses it. The CLI never trains or converts a checkpoint into GGUF.
+
+#### llama.cpp
+
+Use a preset or an existing persistent GGUF:
+
+```sh
+fastgpu deploy qwen3.8-27b --context 16384
+fastgpu deploy vol:models/custom.gguf --name custom --context 4096
+fastgpu deploy vol:models/custom.gguf --context 4096 --arg=--temp --arg=0.2
+```
+
+The managed command binds remote loopback port 8080, sets the alias and context, requests all GPU layers, disables automatic fitting, selects one parallel sequence, and enables Jinja templates. Model/context fit must be checked for your hardware. List available engine options with `fastgpu shell llama-server --help`.
+
+#### Ollama
+
+```sh
+fastgpu deploy vol:models/custom.gguf --engine ollama --name custom --context 4096
+```
+
+Ollama starts on remote port 8080 and imports into the persistent store. With no custom file, the worker generates a Modelfile with `FROM` and `PARAMETER num_ctx`. A custom Modelfile controls those model settings itself; make its `FROM` refer to the intended persistent weights. Keep the CLI target consistent with the imported model because that target is fingerprinted.
+
+```text
+FROM /workspace/models/custom.gguf
 PARAMETER num_ctx 4096
-PARAMETER temperature 0.6
-SYSTEM Answer in English.
+PARAMETER temperature 0.2
 ```
 
-Then run:
+Save this locally as `Modelfile`, then:
 
 ```sh
-fastgpu deploy /workspace/models/my-model.gguf --engine ollama --name my-model \
-  --modelfile /workspace/models/Modelfile
+fastgpu push ./Modelfile vol:models
+fastgpu deploy vol:models/custom.gguf --engine ollama --name custom \
+  --modelfile vol:models/Modelfile
 ```
 
-With `--modelfile`, that file controls the content and parameters: set `num_ctx` there too. Keep every artifact referenced by the Modelfile on the volume. Import may create an initial copy in Ollama's storage format; it stays under `/workspace/.gpu/ollama/models`.
+`--arg` is rejected for Ollama. Import can require additional volume space. Supported formats depend on the engine; see [Ollama's import documentation](https://docs.ollama.com/import).
 
-Both the OpenAI-compatible API and native endpoints such as `http://127.0.0.1:8080/api/tags` are available through the same tunnel. Ollama may show the model with a `:latest` suffix in its catalog.
+#### vLLM
 
-## vLLM with checkpoints
-
-An exported checkpoint must contain the required configuration, weights, and tokenizer. For LoRA/QLoRA, prepare a complete checkpoint or supply the vLLM options needed for your setup.
+Use a complete compatible checkpoint, or an HF ID:
 
 ```sh
-fastgpu deploy /home/gpu/checkpoints/experiment --engine vllm --name my-model \
-  --context 4096 --arg=--enforce-eager \
-  --arg=--gpu-memory-utilization --arg=0.85
+fastgpu deploy home:checkpoints/experiment --engine vllm --name custom \
+  --context 4096 --arg=--enforce-eager
+fastgpu deploy ORGANIZATION/MODEL --engine vllm --hf --context 4096
 ```
 
-For a model from Hugging Face:
+A local checkpoint must include `config.json`, weights, and the files its tokenizer/architecture requires. HF downloads use the persistent cache. Authentication for gated/private models must be configured separately on the Pod; the local RunPod API key does not authenticate Hugging Face.
+
+For GGUF, specify an explicit tokenizer:
 
 ```sh
-fastgpu deploy ORGANIZATION/MODEL --engine vllm --hf --name my-model \
-  --context 4096 --arg=--revision --arg=REVISION
+fastgpu deploy vol:models/custom.gguf --engine vllm \
+  --tokenizer ORGANIZATION/TOKENIZER --context 4096
 ```
 
-`--hf` distinguishes a remote model ID from a path. Downloads are cached in the persistent home directory. Private and gated models require Hugging Face authentication on the Pod; the CLI does not automatically copy tokens from your local computer.
+GGUF support and compatibility are engine-dependent; consult [vLLM's GGUF documentation](https://docs.vllm.ai/en/latest/features/quantization/gguf/). The live validation recorded below used llama.cpp, not this path.
 
-The image defaults to the native sampler so sampling does not depend on compiling FlashInfer with `nvcc`. Other kernels or models may require additional image dependencies.
+To pin an HF revision where supported by the installed vLLM version, pass its `--revision` through `--arg`. HF-ID deployments are not content-hashed by fastgpu. Local checkpoint fingerprints track file paths, sizes, and modification times rather than hashing every tensor byte.
 
-## vLLM with GGUF
+#### Extra arguments and readiness
 
-The [vLLM documentation](https://docs.vllm.ai/en/latest/features/quantization/gguf/) describes GGUF support as experimental. Specify the original model's tokenizer or a compatible persistent tokenizer path:
+For a flag with a value, use repeated arguments: `--arg=--gpu-memory-utilization --arg=0.8`. CLI-managed flags are reserved, including `--host`, `--port`, `--model`, `--alias`, `--served-model-name`, `--ctx-size`, `--max-model-len`, `--tokenizer`, `--config`, `--api-key`, `--ssl`, `--rpc`, `--download-dir`, `--daemon`, `--help`, and `--version`; SSL-prefixed options and recognized abbreviations of reserved options are rejected too. Short engine flags are rejected; negative numeric values are accepted as values.
 
-```sh
-fastgpu deploy /workspace/models/my-model.gguf --engine vllm --name my-model \
-  --tokenizer ORGANIZATION/BASE_MODEL --context 4096 \
-  --arg=--enforce-eager
-```
+For llama.cpp/vLLM, readiness checks health and the expected `/v1/models` alias. For Ollama, the alias must also appear among loaded models. The client allows up to 20 minutes for readiness after the worker deployment call; downloads and Ollama loading have their own waits. These are not a single total-command deadline.
 
-If the model also requires a separate HF configuration, supply it with `--arg=--hf-config-path --arg=/workspace/models/configuration`. Check that your vLLM version and GPU support the architecture and quantization. If they do not, use the HF checkpoint or a supported GGUF with llama.cpp/Ollama.
+The API base URL is `http://127.0.0.1:LOCAL_PORT/v1`. Requests use the served alias in `model`. The managed service is not exposed as a public RunPod HTTP port, and the CLI does not configure an API key for it. The SSH tunnel binds only local loopback.
 
-## Included presets
+### fastgpu undeploy
 
-```sh
-fastgpu deploy qwen3.8-27b
-fastgpu deploy nanbeige4.3-33b
-```
+Close the managed tunnel and stop the inference service on the selected Pod. Keep models, caches, the deployment manifest, and the Pod. Compute remains allocated. The worker version must match the client. Use `down` to terminate compute.
 
-| Deploy alias | GGUF | Download size |
-| --- | --- | --- |
-| `qwen3.8-27b` | Unsloth `Qwen3.8-27B-UD-Q4_K_M.gguf` | 16.46 GB |
-| `nanbeige4.3-33b` | Bartowski `Nanbeige_Nanbeige4.3-33B-Q4_K_M.gguf` | 20.79 GB |
+## Diagnostics
 
-Each preset downloads to `/workspace/.gpu/models` if absent, verifies its pinned size and SHA-256, and uses llama.cpp by default. Later deployments reuse the file. `fastgpu up` and `fastgpu deploy` without a model still select Qwen. Other engines have their own format, template, and tokenizer requirements.
-
-The default context is 131,072 tokens unless overridden by the saved profile or `--context`. Nanbeige's [configuration](https://huggingface.co/Nanbeige/Nanbeige4.3-33B/blob/main/config.json) implies about 26 GiB of FP16 KV cache at that context, in addition to the weights and runtime buffers. A 24 GB GPU is insufficient for full GPU offload at 128k with that cache; choose a larger GPU or suitable cache settings. `--min-vram` only affects creation of a new Pod. Nanbeige generation and tool calling still require validation on the selected GPU and image.
-
-Both the local CLI and the worker in the Docker image must contain the new preset and listing commands. Rebuild the client and image when upgrading from a build that only supports Qwen; see [image builds](CLI.md).
-
-## List installed GGUFs
-
-```sh
-fastgpu model list
-fastgpu model list /workspace/models
-fastgpu model list home:checkpoints
-```
-
-With no directory, the command searches `/workspace/.gpu/models`. An explicit directory selects another location on the volume. Subdirectories are included; symlinks, partial downloads, and verification metadata are excluded. A reachable Pod is required.
-
-The `DEPLOY TARGET` column shows the short alias for presets in the managed directory and a shell-quoted absolute path for other GGUFs. Copy that value after `fastgpu deploy`. The listing covers GGUF files; checkpoint directories and Ollama's imported blob store are separate storage formats.
-
-## Endpoints and engine changes
-
-```sh
-fastgpu deploy /workspace/models/my-model.gguf --name my-model --local-port 8081
-curl http://127.0.0.1:8081/v1/models
-```
-
-Inference listens on the remote loopback interface. RunPod exposes SSH, and the tunnel makes the API available only on your local loopback interface. `--local-port` changes the local port; the managed remote port remains 8080.
-
-The CLI manages one inference service per Pod. A different deployment stops the previous service, waits for the new engine, and opens the tunnel. Switching can interrupt requests in progress. An identical deployment that is already ready reuses the service.
-
-Do not modify weights while they are being served. Finish exporting to a new file, then deploy that path. GGUF verification caches SHA-256 using file size and modification time; directories are identified using file metadata. The volume is assumed to be modified by trusted processes.
-
-```sh
-fastgpu logs
-fastgpu logs --follow
-fastgpu undeploy
-```
-
-`undeploy` stops the service and closes the tunnel. Use `fastgpu down` to terminate the GPU Pod as well. Model or memory errors leave the Pod available for inspection; they do not automatically end billing.
-
-## Sources
-
-- [llama.cpp server](https://github.com/ggml-org/llama.cpp/tree/master/tools/server)
-- [Importing models in Ollama](https://docs.ollama.com/import)
-- [Ollama Modelfile format](https://docs.ollama.com/modelfile)
-- [Ollama API compatibility](https://docs.ollama.com/api/openai-compatibility)
-- [GGUF models in vLLM](https://docs.vllm.ai/en/latest/features/quantization/gguf/)
-
-
-## Persistenza e lavoro remoto
-
-
-## Volume mount
-
-The selected Network Volume is attached at `/workspace` when the Pod is created. The image stores its environment under `/workspace/.gpu` and creates this symlink:
+### fastgpu logs
 
 ```text
-/home/gpu -> /workspace/.gpu/home
+fastgpu logs [--follow | --pod]
 ```
 
-Writing to the remote home directory therefore writes to the volume. The volume remains after `fastgpu down`; a new Pod mounting the same volume will find those files again.
+Default: print the last 100 lines of `/workspace/.gpu/logs/inference.log` over SSH. `--follow` follows that file across rotation until interrupted. `--pod` instead reads RunPod's container log event stream with a tail request of 100, useful before SSH is ready. The API stream can stay open until interrupted. The two flags conflict. Before any inference has run, the inference log may not exist.
 
-| Path | Contents |
-| --- | --- |
-| `/home/gpu/progetti` | Default project directory created by the current image |
-| `/home/gpu/datasets` | Training data |
-| `/home/gpu/checkpoints` | Checkpoints, exports, and outputs |
-| `/home/gpu/.cache/huggingface` | Hugging Face weights, tokenizers, and cache |
-| `/home/gpu/.cache/torch` | PyTorch cache |
-| `/home/gpu/.cache/uv` | uv cache |
-| `/workspace/.gpu/models` | Included model, partial downloads, and verification metadata |
-| `/workspace/.gpu/ollama/models` | Persistent Ollama model store |
-| `/workspace/.gpu/logs` | Rotating inference logs |
-| `/workspace/.gpu/deployment.json` | Last deployment configuration |
+### fastgpu doctor
 
-The examples below create a `projects` directory; any directory under the remote home is persistent. You can also use `/workspace/models`, `/workspace/datasets`, or other directories on the volume. `/tmp`, `/opt`, `/usr`, and other container-disk locations are outside the Network Volume. Save outputs you want to keep under the home directory or `/workspace`.
-
-## Clone a repository once
-
-```sh
-fastgpu up --skip-model
-fastgpu mkdir projects
-fastgpu shell --cwd home:projects git clone REPOSITORY_URL experiment
-fastgpu code projects/experiment
+```text
+fastgpu doctor [--remote]
 ```
 
-The repository is cloned on the Pod and stays on the volume. After recreating the Pod, open it directly with `fastgpu code projects/experiment`. Run `git pull` when you want to update it; `up` does not clone or synchronize code automatically.
+Check local `ssh` and `rsync`, report optional `code`, then verify RunPod API access by listing volumes. `--remote` additionally requires a reachable selected Pod and matching worker, and checks Python, uv, GitHub CLI, Codex CLI, llama.cpp, Ollama, NVIDIA information, PyTorch/vLLM imports, and a small CUDA computation.
 
-For private repositories, authenticate Git or `gh` on the Pod with your account. Credentials saved in the home directory are persistent: anyone able to mount the same volume can access those files.
+The checks stop at the first failure. Installed tools are not automatically logged into their respective accounts. A passing doctor does not prove every model/context fits the GPU.
 
-## Copy a local project
+### fastgpu cost
 
-```sh
-fastgpu push ./experiment/ home:projects/experiment
-fastgpu pull home:projects/experiment/ ./local-copy
+Print selected Pod ID, status, compute USD/hour, and creation timestamp as JSON. It does not calculate accumulated cost or charge stopped time as if compute were running. Storage is separate; use provider billing for actual charges.
+
+### fastgpu info
+
+```text
+fastgpu info [--live]
 ```
 
-Transfers are explicit. `push` uses rsync and reuses existing files when possible; `up` and `deploy` do not copy the project again. The destination is a directory. A trailing `/` on the source copies its contents; without it, rsync also copies the directory itself.
+Print a JSON overview with provider Pod details, attached volumes, connection commands, and persistent paths. `--live` adds a remote Python probe for OS, visible CPUs, resolved home, GPU VRAM/usage, driver information, and kernel memory fields.
 
-Transfers do not use `--delete`: files found only at the destination are kept. `.venv`, `__pycache__`, `.env`, `.env.*`, `*.pem`, and `*.key` are excluded. Create Python environments on the Pod rather than copying a virtual environment built on your local computer.
+Credential-bearing environment/registry fields are omitted from provider details. Do not confuse the API Pod's `gpu.memory` field, used here as system RAM, with GPU VRAM; use the live NVIDIA probe for VRAM. `info` still requires a selected Pod.
 
-## Run training
+## Network Volumes
 
-```sh
-fastgpu shell
-fastgpu shell --cwd home:projects/experiment python train.py
-fastgpu code projects/experiment
+### fastgpu volumes
+
+`fastgpu volumes` defaults to `volumes list`. `fastgpu volume ...` is an alias. Selectors use exact IDs first, otherwise unique names. Duplicate names require an ID. Operations act on account storage; switching a local selection does not move data between volumes or data centers.
+
+### fastgpu volumes list
+
+List account Network Volumes as JSON. No selection or mutation.
+
+### fastgpu volumes show
+
+```text
+fastgpu volumes show ID_OR_NAME
 ```
 
-Without arguments, `fastgpu shell` opens an interactive SSH terminal in the home directory. Enter your project and work normally. In VS Code, use the remote terminal in the opened folder.
+Resolve one existing volume and print its details. No running Pod is required.
 
-Your script must save checkpoints and GGUF files in the home directory or on the volume. If `train.py` writes relative paths, `--cwd home:projects/experiment` keeps them inside the persistent project. If the script accepts an output directory, point it to a location such as `/home/gpu/checkpoints/experiment`.
+### fastgpu volumes use
 
-Training, merging LoRA adapters, and GGUF conversion remain your responsibility. For LoRA/QLoRA, prepare the complete model or the GGUF required by your chosen engine.
-
-To keep training running after SSH disconnects:
-
-```sh
-fastgpu shell --tty tmux new-session -A -s training
+```text
+fastgpu volumes use ID_OR_NAME
 ```
 
-Start the script inside tmux and detach using tmux's key sequence. The Pod remains billable while it is running.
+Save the resolved volume ID to the profile. Refuse if a selected Pod uses a different volume; run `down` before switching. Does not attach storage to a running Pod or create resources.
 
-## Models and caches
+### fastgpu volumes create
 
-The Qwen and Nanbeige presets have pinned URLs, revisions, and SHA-256 checksums. Downloads use a resumable `.partial` file and are renamed after verification. Later deployments reuse the existing GGUF.
+```text
+fastgpu volumes create NAME --size GB --datacenter DATA_CENTER_ID [--type TYPE]
+```
 
-For your own GGUF, `fastgpu deploy /workspace/models/my-model.gguf` reads that file directly and caches its verification result. It does not download or copy it. Finish saving before deployment; if the file changes, run a new deploy to apply the new version.
+Create paid storage explicitly. `--size` must be 10–4096 GB and `--datacenter` must be nonempty. `--type` defaults to `STANDARD`; the other accepted value is `HIGH_PERFORMANCE`. Availability is provider-dependent. The CLI does not offer a data-center-list command: use RunPod's console/API to choose a supported location.
 
-vLLM reads local checkpoints or uses the Hugging Face cache in the home directory. An unpinned Hugging Face model ID may resolve to updated weights when its remote revision changes. To reproduce the weights, pass `--arg=--revision --arg=REVISION` or use a saved local checkpoint.
+Print the created volume as JSON, without selecting it or starting a Pod. Use `volumes use` afterward if desired. The volume's data center constrains future Pod placement.
 
-Ollama imports a GGUF or checkpoint into its own blob store. The first import may require additional storage. Blobs and manifests remain on the volume and are reused instead of being recreated on ephemeral storage for every Pod.
+### fastgpu volumes rename
 
-## Check data locations
+```text
+fastgpu volumes rename ID_OR_NAME NEW_NAME
+```
+
+Set a nonempty display name through the API. The ID, data, capacity, and attachments remain the same. A saved ID keeps identifying the volume after a rename.
+
+### fastgpu volumes resize
+
+```text
+fastgpu volumes resize ID_OR_NAME GB
+```
+
+Set total capacity, not an increment. The requested size must be at least the current size and no more than 4096 GB. Shrinking is refused. Increasing capacity is a persistent storage-cost change.
+
+### fastgpu volumes delete
+
+```text
+fastgpu volumes delete ID_OR_NAME --confirm EXACT_VOLUME_ID
+```
+
+Permanently delete an unprotected volume and its data. Confirmation must match the resolved ID, even if selecting by name. Refuse a volume whose ID matches `config.volume` or `state.volume_id`, or a volume attached to any listed account Pod. Configuration commands save resolved IDs; keep IDs in those fields when editing the profile manually so the protection applies. These checks do not create a distributed lock against concurrent external changes; RunPod also decides whether deletion is permitted.
+
+Use `down` when the intent is to remove only compute. This command is the separate explicit operation for deleting persistent storage.
+
+## Remote project workflow
+
+Clone once into the persistent home:
 
 ```sh
-fastgpu info
-fastgpu info --live
-fastgpu shell pwd
+fastgpu shell mkdir -p projects
+fastgpu shell --cwd home:projects git clone https://github.com/YOUR_ACCOUNT/YOUR_REPOSITORY.git
+fastgpu code home:projects/YOUR_REPOSITORY
+```
+
+GitHub authentication is separate from RunPod/SSH authentication. For a local project, use `push` instead. `up` and `deploy` do not continually recopy your repository.
+
+Create project-specific dependencies on the volume:
+
+```sh
+fastgpu shell --cwd home:projects/demo uv venv
+fastgpu shell --cwd home:projects/demo uv pip install --python .venv/bin/python -r requirements.txt
+fastgpu shell --cwd home:projects/demo .venv/bin/python train.py
+```
+
+For a long job, open `fastgpu shell --tty tmux new -A -s training`, then run the script inside tmux. Detach with Ctrl-B followed by D. A tmux session survives a disconnected SSH client, but not Pod termination; checkpoints must still be saved on persistent storage.
+
+Useful location checks:
+
+```sh
 fastgpu shell readlink -f /home/gpu
+fastgpu shell df -h /workspace
 fastgpu shell ls -lh /workspace/.gpu/models
 ```
 
-`info --live` shows the resolved home directory. Network Volume capacity comes from the API; on some shared filesystems, `df` reports the storage pool rather than the individual volume's quota.
+On shared filesystems, `df` may describe the storage pool rather than your volume quota. Use the provider's volume details for allocated capacity. One managed environment per volume is supported; a workspace lock protects cooperating fastgpu containers. Processes that ignore it can still modify the same data.
 
-## Concurrency and retention
+## Container image
 
-One active `fastgpu` environment per volume is supported. A lock protects the home directory; other programs that ignore these locks can still modify the same files.
+The default published worker image is `felipeoperti/fastgpu-workspace:0.3.0`. The image validated on November 15, 2026 has digest:
 
-The image does not recursively `chown` the mount. Some Network Volumes remap UID/GID and reject POSIX ownership changes; startup checks that managed directories are writable. Do not rely on volume `chmod` settings to isolate people who can access the same storage.
+```text
+sha256:71d1d636a162a6c9d9ba02b39f9bdcd768f4cb59549903cc68dea70d46cfe9e7
+```
 
-`down` preserves the volume and its data. `volumes delete` is an explicit, irreversible deletion of unprotected storage. Retained storage remains billable.
+Pin that exact build with:
 
+```sh
+fastgpu init --image felipeoperti/fastgpu-workspace@sha256:71d1d636a162a6c9d9ba02b39f9bdcd768f4cb59549903cc68dea70d46cfe9e7
+```
 
-## Immagine Docker
+The local help-banner change followed this image's publication; it does not change the worker protocol. Version checks compare version strings, while a digest identifies an exact image build.
 
+### Components and extension points
 
-The image contains software and libraries. Repositories, checkpoints, models, and caches live on the Network Volume. The build copies only the required source and installation scripts; keys, local profiles, and logs are excluded from its context.
+The Dockerfile uses a Rust 1.91.1 Bookworm builder and an Ubuntu 24.04 CUDA 13.0.2 runtime image. The source pins uv 0.13.6, vLLM 0.33.0, llama.cpp b12034, Ollama 0.40.13, GitHub CLI 2.103.3, and Codex CLI 0.166.0. These are repository pins, not claims about the latest upstream versions. Python 3.12, SSH, rsync, tmux, and build tools are also included.
 
-## Components
-
-- Ubuntu 24.04 with CUDA runtime 13.0.2, requiring a compatible NVIDIA host.
-- Python 3.12, uv 0.13.6, and a vLLM 0.33.0 environment at `/opt/vllm`.
-- llama.cpp release `b12034`, Linux x64 CUDA 12.8 binaries, and matching runtime libraries at `/opt/llama`.
-- Ollama 0.40.13 for Linux x86-64, including libraries from its official distribution.
-- Git, GitHub CLI 2.103.3, Codex CLI 0.166.0, OpenSSH server, rsync, tmux, and build tools.
-- Python headers and Ninja for compiling Triton components.
-
-The Rust `fastgpu` CLI is compiled from `src/` in the `rust:1.91.1-bookworm` build stage using `cargo build --release --locked`, then installed at `/usr/local/bin/fastgpu`. The build includes `Cargo.toml` and `Cargo.lock`; the final CUDA image does not include Cargo or the Rust compiler. The binary uses the system C library and rustls for TLS. Supervisor invokes `fastgpu worker serve`. Main downloaded archives have pinned versions and SHA-256 checksums. Direct Python dependencies are pinned; transitive and apt dependencies can change between builds. `/opt/python-installed.txt` records the resolved Python versions.
-
-vLLM uses its native sampler through `VLLM_USE_FLASHINFER_SAMPLER=0`; inference still runs on the GPU. This avoids requiring `nvcc` for the FlashInfer sampler, as described in the [NVIDIA documentation](https://docs.dynamo.nvidia.com/dynamo/v1.3.0/getting-started/local-installation). Add compatible toolkit/kernel-cache dependencies and repeat model tests if you need specific FlashInfer kernels.
-
-## Where to add software
-
-| File | What to change |
+| File | What to customize |
 | --- | --- |
-| `docker/packages.apt` | Ubuntu packages, one per line |
-| `docker/requirements.txt` | Direct dependencies of the inference Python environment |
-| `docker/install.d/*.sh` | Custom installation scripts, executed alphabetically |
-| `docker/Dockerfile` | Layer composition, base image, and environment variables |
-| `docker/entrypoint.sh` | Volume, home, cache, and SSH initialization |
-| `docker/supervisord.conf` | Services and log rotation |
+| [docker/packages.apt](../docker/packages.apt) | System packages |
+| [docker/requirements.txt](../docker/requirements.txt) | Inference Python dependencies |
+| [docker/install.d](../docker/install.d) | Numbered installation scripts, executed in order |
+| [docker/Dockerfile](../docker/Dockerfile) | Base images, layers, environment, metadata |
+| [docker/entrypoint.sh](../docker/entrypoint.sh) | Persistent home, SSH, and startup checks |
+| [docker/supervisord.conf](../docker/supervisord.conf) | Services and log rotation |
 
-Add Ubuntu packages to `packages.apt`. For software with its own distribution, add a numbered script under `install.d`; Ollama, for example, is installed by `40-ollama.sh`.
+The final image contains the compiled worker, not the Rust compiler. Project-specific virtual environments can persist on the volume; system changes belong in a rebuilt image. Apt/transitive dependencies may change between builds even when direct dependencies are pinned. `/opt/python-installed.txt` records the resolved Python environment.
 
-Scripts must be non-interactive, stop on errors, and install into `/usr`, `/usr/local`, or `/opt`. Pin versions and verify checksums when available. Keep tokens out of scripts, build arguments, and the Dockerfile.
+Startup requires a mounted `/workspace` and `PUBLIC_KEY`; `up` supplies them. It initializes the managed `.gpu` namespace, checks its format and write access, establishes the persistent home, prepares SSH keys, obtains a workspace lock, and starts Supervisor. The user is `gpu` (UID/GID 2000). Startup does not recursively change ownership of user data. Some volumes remap ownership; sharing storage is not a user-isolation mechanism.
 
-Create uv environments in the persistent home directory for project-specific dependencies. Build a new image for system-level additions. Installing packages on a running container's disk does not make those changes persistent across new Pods.
+Supervisor starts SSH automatically. Inference starts through `deploy`, including after a new Pod is created from an existing volume. Inference logs rotate at 20 MB with three backups. `HF_HOME`, `TORCH_HOME`, `UV_CACHE_DIR`, and `OLLAMA_MODELS` point to persistent locations. `VLLM_USE_FLASHINFER_SAMPLER=0` is an image setting; it does not disable GPU inference.
 
-## Build locally
+### Upgrading the image
+
+Save work on the volume, then explicitly replace compute:
+
+```sh
+fastgpu down
+fastgpu init --image felipeoperti/fastgpu-workspace:0.3.0
+fastgpu up --small --skip-model
+fastgpu doctor --remote
+```
+
+Only run `down` when a managed Pod is selected. Updating the local CLI or saving a new image reference does not modify an existing Pod. The old 0.2.1 worker is incompatible with current model/deployment commands; the CLI reports the mismatch before those worker operations.
+
+To build and publish your own image, choose a registry you control:
 
 ```sh
 make image IMAGE=YOUR_ACCOUNT/fastgpu-workspace:0.3.0
-```
-
-To check just the Rust CLI build stage:
-
-```sh
-docker build --target cli -f docker/Dockerfile -t fastgpu-cli-test .
-docker run --rm fastgpu-cli-test /fastgpu --version
-```
-
-The image is large because it includes three inference engines and GPU libraries. Allow enough disk space for layers, extraction, and Docker's cache. Docker is not required to use the client alone.
-
-## Registry and image publishing
-
-RunPod must be able to pull the image from a registry. To publish your own:
-
-```sh
 docker login
 docker push YOUR_ACCOUNT/fastgpu-workspace:0.3.0
-docker inspect --format '{{index .RepoDigests 0}}' YOUR_ACCOUNT/fastgpu-workspace:0.3.0
-fastgpu init --image YOUR_ACCOUNT/fastgpu-workspace@sha256:DIGEST
 ```
 
-Replace these placeholders with real references. A digest selects an exact image; use a new tag for each release. For private images, configure a registry credential in RunPod and pass its ID to `fastgpu init --registry`.
+Publication is an explicit external operation. A local image build is not automatically available to RunPod. Private images require a registry credential configured in RunPod and its ID saved with `init --registry`. Match the worker version to the local client and record the published digest. Public npm publication is a separate workflow described in [the course](how-to.md#31-publishing-a-public-release).
 
-Publishing an image does not publish the source on GitHub. Version 0.3.0 must contain the Rust `fastgpu` worker matching the local client. The default reference is `felipeoperti/fastgpu-workspace:0.3.0`, but this source migration does not publish that tag or assign it a digest. The older 0.2.1 image remains a historical validation baseline, not a validated Rust image; see [validation](CLI.md).
+## Internal worker commands
 
-## Startup and persistence
+The same executable runs inside the container. These commands assume its initialized filesystem and services; they are not normal local workflows and are hidden from root help.
 
-The container requires `/workspace` to be mounted and `PUBLIC_KEY` to be set; `fastgpu up` supplies both. The remote user is `gpu`, UID/GID 2000. `/home/gpu` points to `/workspace/.gpu/home`; startup prepares project, dataset, checkpoint, and cache directories.
-
-`HF_HOME`, `TORCH_HOME`, and `UV_CACHE_DIR` point to caches in the persistent home directory. `OLLAMA_MODELS` is `/workspace/.gpu/ollama/models`; `OLLAMA_HOST` selects the loopback interface on managed port 8080. The same settings are available in SSH shells.
-
-The `.gpu` namespace must be absent/empty on first use or already initialized with the expected format. Startup does not recursively change ownership on the volume. If the filesystem rejects `chown`, startup checks that the remote user can write to the managed directories.
-
-Operational authorized keys are stored on the container's local disk. SSH host keys have a persistent copy per Pod ID and are prepared locally with SSH's required permissions at startup. Network Volume Unix permissions do not isolate people who can access the same storage.
-
-Supervisor starts SSH. The `inference` service starts only through `fastgpu deploy`, selecting its engine from the persistent manifest. After Pod recreation, data remains and inference is reactivated by deploying. Logs rotate at 20 MB with three backups.
-
-## Validate an extension
-
-1. Build the image with a new tag.
-2. Verify that startup without a volume is rejected and that the new programs launch.
-3. Push the image to the registry and record its digest.
-4. Create a test Pod with a Network Volume and the matching CLI version.
-5. Run `fastgpu doctor --remote`, `fastgpu info --live`, shell commands, transfers, and a VS Code connection.
-6. Run a real generation with the engines and models affected by the change.
-7. Terminate the test Pod with `fastgpu down` and verify that the volume remains.
-
-Testing one GPU or model does not certify every architecture, quantization format, or future option.
-
-
-## Pacchetto npm locale
-
-
-The npm package contains the compiled Rust executable and a small Node.js launcher. Its current name is `fastgpu`, version 0.3.0. It is marked `private: true`, so npm refuses registry publication. No npm account or registry login is required for local packaging or installation.
-
-## Build and install locally
-
-From the source checkout:
-
-```sh
-make npm-package
-npm install -g ./dist/fastgpu-0.3.0.tgz
-fastgpu --version
-```
-
-`make npm-package` runs `npm pack`; its `prepack` hook builds the release binary with `make build`, verifies the package/Cargo/binary versions and Linux x64 ELF header, and copies the executable into `npm/bin/fastgpu`. You can also run `npm pack` directly; it writes the `.tgz` into the current directory.
-
-Creating a package requires Rust, Cargo, make, a C toolchain, Node.js, and npm. Installing an existing `.tgz` requires only Node.js and npm. The package has no npm dependencies and no install-time scripts. OpenSSH and rsync are still needed for remote operations.
-
-The supported Node.js versions are 22.15+ within the 22.x series, and 24 or later. The launcher uses `process.execve` to replace itself with the Rust executable, retaining its standard streams and process identity. Interactive terminals, signals, and exit status are handled by the Rust CLI.
-
-## Linux compatibility
-
-This package supports Linux x64 with glibc. A binary built on your own computer inherits that build environment's glibc requirements. The local Ubuntu build currently requires glibc 2.39; do not assume it works on older distributions.
-
-To package the Debian-based Docker CLI build, use:
-
-```sh
-docker build --target cli -f docker/Dockerfile -t fastgpu-cli-npm .
-mkdir -p .local/npm-build
-npm_container=$(docker create fastgpu-cli-npm)
-docker cp "$npm_container":/fastgpu .local/npm-build/fastgpu
-docker rm "$npm_container"
-FASTGPU_NPM_BINARY="$PWD/.local/npm-build/fastgpu" make npm-package
-```
-
-`FASTGPU_NPM_BINARY` selects an already compiled executable; version and architecture checks still apply. This build uses Debian Bookworm and requires glibc 2.34 or newer according to its imported symbols. The archive is intended for glibc-based Linux systems, including Debian 12; Alpine/musl, ARM64, macOS, and Windows are not supported by this package.
-
-The Docker CLI build does not build or publish the CUDA worker image. That image remains a separate artifact and must match the client version for deployment.
-
-## Verify the package
-
-```sh
-npm test
-```
-
-Tests cover argument quoting, environment and working-directory preservation, standard streams, exit codes, SIGINT/SIGTERM, unsupported runtimes, and missing executables. Packaging tests build an archive, inspect its complete file list and executable permissions, and install it offline into a temporary npm prefix. They also reject incompatible or incorrectly versioned input binaries.
-
-Use `FASTGPU_NPM_BINARY=/absolute/path/to/fastgpu npm test` to test a prebuilt executable instead of rebuilding locally. Test installations use temporary directories and do not modify your existing CLI installation or RunPod resources.
-
-Only the launcher, executable, package metadata, README, license, and documentation are included. Generated binaries, tarballs, and `node_modules` are ignored by Git. Future registry distribution requires choosing the final package name/scope and explicitly removing `private: true`.
-
-
-## Architettura
-
-
-## Components
-
-The `fastgpu` Rust client uses RunPod REST API v2, OpenSSH, and rsync. Its entry point is `src/main.rs`, with shared client and worker modules exposed through `src/lib.rs`. The same executable contains internal `worker` commands used inside the container for downloads, installation checks, and service startup. No additional control server is required.
-
-Commands and argument parsing are in `src/cli.rs` (Clap); APIs and resource selection in `src/api.rs` and `src/lifecycle.rs`; SSH, VS Code, and transfers in `src/ssh.rs`; child processes and terminal restoration in `src/process.rs`; connection information in `src/info.rs`; inference engines in `src/engines.rs`; presets and listing in `src/models.rs`; and downloads and remote checks in `src/worker.rs`. `src/config.rs` preserves the existing JSON profile format.
-
-Tokio runs HTTP requests, subprocesses, timeouts, and signal cancellation. Reqwest uses rustls for HTTPS. Dropping a cancelled subprocess kills its child, and a terminal guard restores the original terminal state. Filesystem locks are released when their file handles close. Cargo builds the same executable for the local client and container; `Cargo.lock` pins dependencies.
-
-## Storage
-
-The Network Volume is mounted at `/workspace` and survives Pod termination. The home directory is a symlink to `/workspace/.gpu/home`. This namespace also holds models, the Ollama store, logs, and the deployment manifest. The image supplies software while the volume retains user data.
-
-The volume's data center constrains Pod placement. A container disk or Pod volume disk does not replace this persistence. One managed environment per volume is supported; a lock prevents concurrent startup against the same home directory.
-
-See [persistence](CLI.md) for the layout and workflows.
-
-## Connections and information
-
-The public port is `22/tcp`. The image's SSH user is `gpu`; SSH uses dedicated keys and does not forward the local agent. The client generates a separate configuration file and a Pod-ID-based alias, refreshing its current port mapping.
-
-`info` shows operational provider details and omits credential-bearing containers. `connect` generates direct SSH and TCP forwarding commands. Engines listen on the remote loopback interface and are exposed locally through a tunnel, without publishing their inference port on RunPod.
-
-## Deployment
-
-The client sends the worker a JSON manifest containing the engine, target, alias, context length, and options. The worker validates persistent paths, computes or reuses the model fingerprint, and serializes changes with a lock. One supervisor service, `inference`, runs the selected engine.
-
-llama.cpp reads GGUF directly. vLLM reads a checkpoint or Hugging Face model with a cache in the home directory; GGUF requires a tokenizer. Ollama starts its server and imports the model into its persistent store. A custom Modelfile can define model settings.
-
-Readiness checks include the served alias. For Ollama, the model must be loaded as well as present in its catalog. The tunnel opens after readiness is confirmed.
-
-An identical manifest with an already-ready service is reused. Changing the target, model, or engine stops the previous service before starting the next. The CLI does not perform training or conversion.
-
-## Model verification
-
-The Qwen preset uses:
-
-- Repository: `unsloth/Qwen3.8-27B-GGUF`.
-- Revision: `4ca720788d1e01f1bff70c033e0d0028fd02e502`.
-- File: `Qwen3.8-27B-UD-Q4_K_M.gguf`, 16,464,440,224 bytes.
-- SHA-256: `322e194ff79741c7baa497c240f677f54b201b0efab44ca8e50f122b39123482`.
-
-The Nanbeige preset (`nanbeige4.3-33b`) uses:
-
-- Repository: `bartowski/Nanbeige_Nanbeige4.3-33B-GGUF`.
-- Revision: `9beb68421fdf7be095093a6888325fa2c83ddd38`.
-- File: `Nanbeige_Nanbeige4.3-33B-Q4_K_M.gguf`, 20,788,825,216 bytes.
-- SHA-256: `2cef79855ca47ee6571e166db32a07089e34f3cf78e0397b262d124ddb814c37`.
-
-Partial downloads resume through HTTP Range and are renamed after verification. Custom GGUF verification is cached using size and modification time. Checkpoints are identified by file metadata; Hugging Face IDs require an explicit revision to pin the weights.
-
-These caches assume trusted processes on the volume. They do not defend against deliberate changes to files and metadata. Do not modify weights while they are being served.
-
-## Errors and recovery
-
-Local configuration and state use temporary files and rename; SSH configuration is replaced atomically too. A lock serializes profile mutations. API reads complete pagination and retry some transient errors; writes with uncertain outcomes are not repeated automatically.
-
-Creation records an operation name first. If the response is lost, the client looks for that resource before creating another. The Pod ID is saved before waiting for SSH. Startup failures leave the Pod available for inspection and termination.
-
-`down` deletes only the managed Pod, verifies the Network Volume's existence, then clears local state. Volume deletion is a separate operation requiring ID confirmation and checks for protected/attached volumes.
-
-## Current limitations
-
-- Linux client, one NVIDIA GPU per Pod, Secure Cloud On-Demand.
-- One managed Pod and inference service at a time; creation checks the account for existing `gpu-*` Pods. The profile lock serializes local operations, but account checks cannot make simultaneous creation from different profiles or computers atomic.
-- Model compatibility depends on engine, format, GPU, and options.
-- Training, GGUF export, and LoRA management remain the user's responsibility.
-- No continuous synchronization, S3 backend, or autonomous shutdown timer.
-- No capacity reservation after stopping a Pod.
-- Personal GitHub, Codex, and Hugging Face login is separate from installing their tools.
-
-## Sources
-
-- [RunPod API v2](https://docs.runpod.io/api-reference-v2/overview)
-- [Pod details](https://docs.runpod.io/api-reference-v2/pods/get-a-pod)
-- [Network Volumes](https://docs.runpod.io/storage/network-volumes)
-- [RunPod SSH](https://docs.runpod.io/pods/configuration/use-ssh)
-- [llama.cpp](https://github.com/ggml-org/llama.cpp)
-- [Ollama](https://docs.ollama.com/import)
-- [vLLM](https://docs.vllm.ai/en/latest/)
-
-
-## Verifiche e limiti
-
-
-This document distinguishes completed tests from functionality that still needs validation. Local operational reports may contain account identifiers and are excluded from repository documentation. The historical sections below describe the previous implementation; their GPU and image results do not validate the Rust migration.
-
-## Local npm package — November 15, 2026
-
-Prepared `fastgpu-0.3.0.tgz` for Linux x64 with glibc. The package is private and has not been published to a registry.
-
-- Nine npm tests passed: launcher arguments, streams, environment, working directory, process identity, exit status, signals, runtime errors, binary validation, and offline package installation.
-- The archive file list contains only the executable, launcher, package metadata, README, license, and documentation; executable permissions are retained.
-- `make npm-package` builds and packages the native release. `FASTGPU_NPM_BINARY` was also tested with the executable from the Docker CLI stage.
-- The prepared archive uses the Docker-built binary, whose imported glibc symbols require at least 2.34. Offline installation and `--version`, `--help`, and `config` passed both locally and in a network-disabled Debian Bookworm container, with Cargo absent from the installation PATH.
-- Test installations used temporary prefixes. Existing local installations and RunPod resources were not modified.
-
-See [npm packaging](CLI.md) for installation and rebuilding instructions. These checks do not validate GPU inference.
-
-## Rust migration — November 15, 2026
-
-Version 0.3.0 replaces the local CLI and container worker with Rust. Go sources and module files have been removed; Cargo, the Makefile, and the Docker CLI stage build the Rust executable.
-
-Completed local checks:
-
-- `make test`: 43 tests passed (40 library tests, including the subprocess fixture, and 3 executable tests), with `cargo fmt` and Clippy passing without warnings.
-- `make build`: release binary built as `bin/fastgpu`.
-- `make install DESTDIR=...`: installation verified in a temporary staging directory; the staged binary reports `fastgpu version 0.3.0`.
-- Command help, aliases, argument validation, JSON profile compatibility, file permissions, and profile locks.
-- Mock RunPod API tests for pagination, read retries, creation reconciliation, GPU sizes, price caps, existing-Pod reuse, and protected-volume deletion.
-- Child-process tests for SSH command arguments, exit-status propagation, Pod resume, VS Code paths, rsync exclusions, and cancellation.
-- Model downloads against local HTTP fixtures, including Range handling, checksum rejection, and verified-file reuse; model listing, symlink containment, fingerprints, and engine readiness checks.
-- Docker `cli` stage built successfully with Rust 1.91.1; `/fastgpu --version` reports 0.3.0 inside the container.
-- Worker smoke checks in a network-disabled container with temporary storage and stub supervisor/engine commands: GGUF deployment, checkpoint deployment, engine arguments, loopback settings, model listing, and rejection of changed weights. These checks do not run real inference.
-- Local documentation links and `git diff --check`.
-
-No RunPod resources were created or modified during the migration. The complete CUDA image and GPU inference have not been validated for Rust 0.3.0. The new image tag has not been published; build and publish a matching image before deploying with the Rust client. The historical image digests below refer to earlier releases.
-
-## Historical baseline before the Rust migration
-
-Version 0.1.3 was tested locally and on RunPod using a 32 GB RTX 5090 and a 96 GB RTX PRO 6000:
-
-- Pod creation and termination with a Network Volume.
-- Volume and file retention after Pod recreation.
-- Volume management through real APIs using temporary storage.
-- SSH, transfers verified by SHA-256, arguments containing spaces, and exit-code propagation.
-- VS Code Remote SSH connections.
-- Python/uv, GitHub CLI, Codex CLI, vLLM/PyTorch, and CUDA computation.
-- Resumed and verified Qwen preset downloads and llama.cpp inference from localhost.
-- vLLM generation with a small model and the native sampler.
-- Tunnel closure and termination of only the Pods created for testing.
-
-Version 0.2.1 extends deployment to custom paths and three engines. Its additional tests are recorded below.
-
-## Version 0.2.1 — November 2, 2026
-
-This record predates the CLI rename. Commands below use the current `fastgpu` spelling; the live tests ran with the previous executable. The image and digest recorded here contain `gpu`, not `fastgpu`, and do not validate the rebuilt image required by the renamed client.
-
-Published image: `felipeoperti/gpu-workspace:0.2.1`.
-
-Validated digest: `sha256:3460ff504e8fa46a87d543f1cd8a442db9933599f5dcba10da1eb28070db9bc1`.
-
-Complete engine testing ran on a 96 GB RTX PRO 6000 Blackwell Workstation using On-Demand compute. Machine information and shell access were also tested on a 32 GB RTX PRO 4500. Local Docker tests covered Ollama, llama.cpp, and reuse of the Ollama store after container restart.
-
-| Area | Observed result |
+| Internal command | Action |
 | --- | --- |
-| Go build and tests | Passed, including race detection and `go vet` |
-| Help | General and subcommand help available |
-| `fastgpu info --live` | API/GPU details and home resolved under `/workspace/.gpu/home`; credential-bearing containers excluded |
-| `fastgpu connect` | Generated SSH command executed successfully |
-| Generated TCP forwarding | Connection through the tunnel received an SSH banner |
-| `fastgpu shell` | Interactive terminal, command execution, and exit code 0 |
-| Remote Python script | Ran from the home directory; wrote a checkpoint-directory result retrieved identically through `pull` |
-| Custom GGUF | Copied once into the persistent home directory and verified by SHA-256 |
-| llama.cpp | Deployment by GGUF path and generation from localhost succeeded |
-| Identical deployment | Service process remained unchanged |
-| Ollama | Same GGUF imported; localhost generation and GPU use confirmed by `/api/ps` |
-| Custom Modelfile | Import and generation verified in Docker with configuration stored on the volume |
-| Ollama cache | After Docker restart, the model was found without another import |
-| vLLM | Local Hugging Face checkpoint loaded and localhost generation succeeded |
-| Engine switching | llama.cpp → Ollama → vLLM → llama.cpp succeeded |
-| Qwen3.8-27B preset | GGUF reused from the volume; localhost request for 2+2 returned `4` |
-| Cleanup | Service stopped, tunnel closed, test Pod terminated, and volume verified present |
+| `fastgpu worker prepare [MODEL]` | Prepare a preset, default Qwen |
+| `fastgpu worker list-models [DIRECTORY]` | List persistent GGUFs, default `/workspace/.gpu/models` |
+| `fastgpu worker deploy` | Read a JSON deployment from stdin, validate it, prepare and start the selected engine |
+| `fastgpu worker serve` | Read the saved manifest, check its fingerprint, and replace the worker process with the engine |
+| `fastgpu worker ready` | Check health/catalog and the expected model |
+| `fastgpu worker stop` | Ask Supervisor to stop `inference` |
+| `fastgpu worker check` | Run the image installation/GPU diagnostics |
 
-SmolLM2-135M-Instruct was used for the three-engine tests: Q4_K_M GGUF for llama.cpp/Ollama and a complete checkpoint for vLLM. Requests returned nonempty text. vLLM used a 512-token context, eager mode, and GPU memory utilization of 0.2. Qwen used the default context with thinking disabled in the request.
+The deployment manifest contains `model`, `engine`, `target`, `context`, `sha256`, and optional `hf`, `tokenizer`, `args`, and `modelfile`. Unknown fields are rejected; stdin is limited to 1 MiB. Worker deployment takes a lock, resolves presets and persistent paths, computes the fingerprint, and reuses an identical ready service. Otherwise it stops the old service, writes the manifest atomically, and starts the new one. Do not edit weights while inference is using them.
 
-Testing led to a terminal-handling correction: OpenSSH sets terminal modes while the CLI keeps the original state for restoration. Recognition of explicit RunPod capacity rejection was also tested; uncertain creation outcomes do not authorize automatic write retries.
+## Troubleshooting
 
-No test Pods remained active at completion, and the profile had no selected Pod. Models, caches, and small test files remained on the volume. Detailed logs are under the local `.local/v020-e2e/` directory, which is excluded from the repository. Personal storage names, addresses, and identifiers are not published in the documentation.
+| Symptom | Action |
+| --- | --- |
+| Command missing or old behavior | Check `command -v fastgpu`, `fastgpu --version`, PATH, and native versus npm installations |
+| Missing API key | Set `RUNPOD_API_KEY` or configure runpodctl; avoid printing credentials |
+| Ambiguous volume | Pass an exact ID to `init --volume` or `volumes use` |
+| No compatible GPU | Inspect `up --small --dry-run`, the selected data center, VRAM/CUDA requirements, price cap, and available capacity |
+| Another `gpu-*` Pod exists | Inspect `pods`; reuse/adopt it rather than creating a second environment |
+| Uncertain creation | Inspect `recover`, `pods`, and the RunPod console; adopt the existing Pod or clear state only after verification |
+| Pod running but SSH unavailable | Read `logs --pod`; large image extraction can precede SSH availability |
+| Old worker or `accepts 1 arg(s), received 2` from an old image | Upgrade the image and recreate the Pod, retaining the volume |
+| Host-key mismatch | Verify the Pod/server identity before changing the profile's `known_hosts` |
+| Busy local port | Use `deploy --local-port PORT`, or close the managed tunnel before reopening it on another port |
+| `model list` cannot read a directory | Use an existing persistent directory and check access through `shell` |
+| Checksum mismatch or insufficient space | Inspect model files and volume capacity; incomplete downloads remain resumable, but corrupt complete files require explicit handling |
+| Model fails to become ready | Read `logs`; check format, tokenizer, context, VRAM, and engine options. The Pod may remain running |
+| No inference after restart | Run `deploy` again; startup does not automatically launch the saved manifest |
+| Transfer omitted a file | Check the exclusions and source trailing slash; destinations are directories |
+| VS Code fails | Verify `code` on PATH, Remote - SSH, directory existence, and the generated SSH include |
+| Busy profile lock | Let the other operation finish or inspect it; deleting a lock filename does not safely terminate an active operation |
+| Old Linux cannot run npm binary | Verify Node, CPU architecture, execute permissions, and glibc compatibility; build against an appropriate baseline |
 
-## CLI rename — November 2, 2026
+Errors use the `fastgpu:` prefix. Successful commands exit 0. Child command failures preserve a positive exit code when available; other errors and interrupted operations generally exit 1. SIGINT/SIGTERM cancel the current local operation, but cannot undo a cloud request already accepted. SSH may also leave a remote job running; inspect actual resources after interruption.
 
-Local validation of the `fastgpu` rename passed:
+## Validation and current limits
 
-- `make test`: race-detector tests and `go vet`.
-- `make build` and `make install` into a temporary staging directory.
-- `fastgpu --version`: `fastgpu version 0.2.1` from the built and staged binaries.
-- All 44 help pages, including nested commands, the `volume` alias, and the hidden worker; default image and error prefix checks.
-- Source and documentation audit for old CLI invocations, plus local documentation links.
-- Docker's `cli` build stage and `/fastgpu --version` inside that image.
+The current local suite has **45 Rust tests** and **9 npm tests**. `make test` checks formatting, runs the Rust suite, and runs Clippy; `make test-npm` validates launcher behavior and offline package installation. Help/banner behavior, all command parsers, profile compatibility, API mocks, recovery, protected volumes, transfers, model verification, and readiness are covered by these checks or targeted smoke tests.
 
-At this stage, only Docker's CLI build stage had been validated. The subsequent complete image rebuild and publication are recorded below. RunPod inference tests have not been repeated after the rename.
+Live validation on November 15, 2026 used only the `small` band: one 32 GB RTX PRO 4500 Blackwell, at a provider-reported compute rate of $0.72/hour. It covered configuration, Pod selection/status/info, SSH and an interactive terminal, CUDA computation, VS Code launch, transfer round trips through home/volume/Pod disk, Qwen listing/preparation/deployment, log streams, tunnels, inference shutdown, stop/restart, and Pod termination. Qwen through llama.cpp at a 16,384-token context returned `4` to a 2+2 request over the local tunnel. Repeated deployment succeeded.
 
-## English CLI output — November 2, 2026
+Volume create/rename/resize/select/protected-delete/delete checks used a separate temporary volume. The preexisting volume was retained; the test Pod and temporary cloud volume were removed. Docker startup, real SSH, and a small CPU llama.cpp completion were also checked locally. The Docker-built npm archive was tested on Debian Bookworm; glibc symbol inspection recorded a 2.34 minimum for that tested build, not a guarantee for future builds.
 
-Help, argument placeholders, prompts, messages, errors, worker checks, and container startup messages are now in English. Informational JSON fields from `info` and `connect` are also English; see [the CLI reference](CLI.md).
+These results do not validate every GPU, engine/model combination, long context, or generation feature. Nanbeige and Ollama/vLLM GPU deployment were not revalidated in this pass. VS Code launch was checked rather than a full editor workflow. No medium, large, or xlarge Pod was allocated for these checks.
 
-`make test` passed, including race detection and `go vet`. `make install` updated the local executable. All 44 help pages and 10 local error paths were checked on the installed binary, and embedded Python and shell scripts passed syntax checks. Existing storage paths remain unchanged.
+Current design limits:
 
-## Published renamed image — November 2, 2026
+- Linux client, one selected Pod and one managed inference service per profile; new creation checks for other `gpu-*` Pods in the account.
+- One NVIDIA GPU per Pod, Secure Cloud On-Demand, constrained by the selected Network Volume.
+- Local/profile and volume locks cannot make concurrent operations from different machines globally atomic.
+- No automatic training, GGUF conversion, continuous sync, S3 backend, multi-GPU orchestration, spend budget, or shutdown timer.
+- Stopped Pods have no guaranteed future GPU capacity; retained volumes remain separately billable.
+- File verification caches and checkpoint metadata fingerprints assume trusted writers on the volume.
 
-Published image: `felipeoperti/fastgpu-workspace:0.2.1`.
-
-Digest: `sha256:a6b09b5bfe37a29a3d9885409d1dcef43511eceadd26f82df8b5ddcdb2ebbfdc`.
-
-The complete image was rebuilt from `docker/Dockerfile`. Local tests verified startup with a temporary volume, the SSH daemon reaching RUNNING, and a real SSH login as `gpu` executing `fastgpu --version` successfully. Supervisor references `/usr/local/bin/fastgpu worker serve`; PyTorch and vLLM imports also passed.
-
-Anonymous registry access was verified, and the published image matches the tested local image. The local profile was updated to the published digest, and a read-only RunPod startup plan selected the renamed image with a compatible GPU offer. No new RunPod was allocated for these checks; live GPU inference remains covered only by the earlier baseline.
-
-## Repeat validation
-
-```sh
-make test
-make build
-./bin/fastgpu --help
-./bin/fastgpu deploy --help
-./bin/fastgpu volumes --help
-```
-
-`make test` runs `cargo fmt --all -- --check`, `cargo test --locked`, and `cargo clippy --locked --all-targets -- -D warnings`. Tests cover volume and offer selection, pagination, reconciliation after uncertain creation, deletion of only the Pod, quoting, locks, and SSE logs. New tests cover persistent paths, GGUF fingerprints, engine validation, readiness aliases, and information output without credential-bearing containers.
-
-Preset tests cover both Qwen and Nanbeige through local HTTP downloads: resuming partial files, servers ignoring Range, checksum failures, and reuse of verified files. Listing tests cover preset aliases, custom paths with spaces and quotes, directory selection, and exclusion of partial files, metadata, and symlinks. Nanbeige has not yet been validated with real GPU inference, long context, thinking, or tool calls; the live results above describe the earlier Qwen validation.
-
-For live testing, create a dedicated Pod with an explicitly selected volume. Check `doctor --remote`, `info --live`, `connect`, an interactive `shell`, a transfer round trip, VS Code, and generation with each affected engine. Run `undeploy` and `down` afterward, then verify that the volume exists and preexisting resources have not changed.
-
-Tests do not automatically authenticate GitHub/Codex and do not certify every GPU, quantization format, model, or option combination. GGUF deployment with vLLM remains experimental and was not exercised in this validation; the checkpoint path was tested for vLLM. No automatic training was performed, as training management is outside the CLI's scope.
+Implementation details are linked throughout this reference. For provider behavior outside the CLI, consult [RunPod's API](https://docs.runpod.io/api-reference-v2/overview) and [Network Volume documentation](https://docs.runpod.io/storage/network-volumes).

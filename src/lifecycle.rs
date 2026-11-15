@@ -145,6 +145,7 @@ impl App {
                         }
                         let pod = self.await_ready(&api, &pod.id).await?;
                         if !skip_model {
+                            self.check_worker(&pod).await?;
                             self.remote(
                                 &pod,
                                 &["fastgpu", "worker", "prepare"],
@@ -283,6 +284,7 @@ impl App {
         }
         let pod = self.await_ready(&api, &pod.id).await?;
         if !skip_model {
+            self.check_worker(&pod).await?;
             self.remote(
                 &pod,
                 &["fastgpu", "worker", "prepare"],

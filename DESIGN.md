@@ -26,10 +26,10 @@ Engines have different format and configuration requirements. The CLI provides a
 
 Selection looks for a compatible On-Demand NVIDIA GPU available in the volume's data center, within the selected size's price range and any configured price cap. Small is the default; medium prefers a rate near $3/hour, while small, large, and xlarge prefer the cheapest matching offer. The actual compute rate is checked after creation. Capacity shortages do not trigger automatic replacement volumes or data migration.
 
-Repeated startup reports and reuses the selected Pod. Before creating a Pod, the client checks the account for other non-terminated fastgpu Pods; a new machine requires explicitly terminating the previous one with `down`.
+Running `fastgpu` without arguments displays help. Explicit startup with `up` reports and reuses the selected Pod. Before creating a Pod, the client checks the account for other non-terminated fastgpu Pods; a new machine requires explicitly terminating the previous one with `down`.
 
 `info` shows resources and networking; `connect` produces SSH/TCP commands; `shell` opens an interactive session or runs a remote program. API credentials remain local and SSH uses a dedicated identity.
 
 ## Future extensions
 
-Extension points include engine definitions, Docker installation scripts, and profile configuration. Continuous synchronization, autonomous shutdown, S3 transfers, and training management are outside the current implementation. Start with the [README](README.md) and see [architecture](docs/CLI.md) for details.
+Extension points include engine definitions, Docker installation scripts, and profile configuration. Continuous synchronization, autonomous shutdown, S3 transfers, and training management are outside the current implementation. Start with the [README](README.md) and see the [CLI reference](docs/CLI.md) and [implementation course](docs/how-to.md) for details.

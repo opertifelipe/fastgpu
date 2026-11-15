@@ -17,6 +17,7 @@ fn version_help_and_config_without_credentials() {
         "fastgpu version 0.3.0\n"
     );
     for args in [
+        vec![],
         vec!["--help"],
         vec!["help", "deploy"],
         vec!["volume", "--help"],
@@ -39,6 +40,7 @@ fn errors_use_fastgpu_prefix_and_worker_rejects_unknown_fields() {
     let dir = tempfile::tempdir().unwrap();
     for args in [
         vec!["unknown"],
+        vec!["mkdir", "example"],
         vec!["pods"],
         vec!["up", "--medium", "--large"],
         vec!["worker", "prepare", "unknown"],
@@ -57,4 +59,7 @@ fn malformed_profile_is_reported_without_dumping_contents() {
     let output = cli(dir.path()).arg("config").output().unwrap();
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("config.json"));
+    let output = cli(dir.path()).output().unwrap();
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Usage:"));
 }

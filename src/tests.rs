@@ -168,13 +168,10 @@ fn deployment() -> Deployment {
 }
 async fn dispatch(app: &mut App, args: &[&str]) -> Result<()> {
     let cli = Cli::try_parse_from(std::iter::once("fastgpu").chain(args.iter().copied()))?;
-    app.dispatch(cli.command.unwrap_or_else(|| {
-        Cli::try_parse_from(["fastgpu", "up"])
-            .unwrap()
-            .command
-            .unwrap()
-    }))
-    .await
+    if let Some(command) = cli.command {
+        app.dispatch(command).await?;
+    }
+    Ok(())
 }
 
 #[test]
@@ -448,7 +445,7 @@ async fn uncertain_creation_is_reconciled_without_duplicate() {
 #[tokio::test]
 async fn startup_capacity_retries_stay_in_size() {
     for (args, expected) in [
-        (vec![], vec!["small"]),
+        (vec!["up"], vec!["small"]),
         (vec!["up", "--medium"], vec!["medium", "medium-fallback"]),
     ] {
         let requests = Arc::new(Mutex::new(vec![]));
@@ -1154,8 +1151,12 @@ async fn startup_resumes_and_reuses_selected_pod_with_ssh() {
         .await;
         let dir = tempfile::tempdir().unwrap();
         selected_fixture(dir.path());
-        stub_program(dir.path(), "ssh", "exit 0");
-        for args in [vec![], vec!["up", "--xlarge", "--skip-model"]] {
+        stub_program(
+            dir.path(),
+            "ssh",
+            "for arg do case \"$arg\" in *--version*) echo 'fastgpu version 0.3.0';; esac; done",
+        );
+        for args in [vec!["up"], vec!["up", "--small", "--skip-model"]] {
             let output = fixture_cli(dir.path(), &server, &args).await;
             assert!(
                 output.status.success(),
@@ -1273,6 +1274,85 @@ async fn shell_propagates_status_and_transfer_preserves_arguments() {
     assert!(args.contains("--exclude\n.env\n"));
     assert!(args.contains(&format!("{}/\n", local.display())));
     assert!(args.ends_with("gpu-p:/home/gpu/project with spaces/\n"));
+    let output = fixture_cli(
+        dir.path(),
+        &server,
+        &["pull", "/tmp/job with spaces/", local.to_str().unwrap()],
+    )
+    .await;
+    assert!(output.status.success());
+    let args = fs::read_to_string(dir.path().join("arguments")).unwrap();
+    assert!(args.ends_with(&format!(
+        "gpu-p:/tmp/job with spaces/\n{}/\n",
+        local.display()
+    )));
+    assert_eq!(transfer_path("/tmp/a/../b").unwrap(), "/tmp/b");
+    assert!(transfer_path("/tmp/b\n").is_err());
+    assert!(transfer_path("vol:../outside").is_err());
+}
+
+#[tokio::test]
+async fn model_commands_check_worker_before_passing_arguments() {
+    let server = server(|r| {
+        assert_eq!(r.path, "/pods/p");
+        ok(running_pod())
+    })
+    .await;
+    let dir = tempfile::tempdir().unwrap();
+    selected_fixture(dir.path());
+    for version in ["0.2.1", VERSION] {
+        stub_program(
+            dir.path(),
+            "ssh",
+            &format!(
+                "for arg do case \"$arg\" in *--version*) echo 'fastgpu version {version}'; exit 0;; esac; done\nprintf '%s\\n' \"$@\" > \"$FASTGPU_TEST_CAPTURE\""
+            ),
+        );
+        for (args, expected) in [
+            (vec!["model", "list"], MODEL_DIR),
+            (
+                vec!["model", "list", "vol:my models"],
+                "/workspace/my models",
+            ),
+            (vec!["model", "pull", MODEL_ALIAS], MODEL_ALIAS),
+        ] {
+            let output = fixture_cli(dir.path(), &server, &args).await;
+            if version == VERSION {
+                assert!(output.status.success());
+                let captured = fs::read_to_string(dir.path().join("arguments")).unwrap();
+                assert!(captured.contains(expected));
+            } else {
+                assert!(!output.status.success());
+                assert!(
+                    String::from_utf8_lossy(&output.stderr).contains("remote CLI version mismatch")
+                );
+                assert!(!dir.path().join("arguments").exists());
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn recovery_requires_absent_pending_pod_and_keeps_selected_state() {
+    for exists in [false, true] {
+        let server = server(move |r| {
+            assert_eq!(r.method, "GET");
+            assert_eq!(r.path, "/pods");
+            ok(json!({"pods": if exists { vec![json!({"id":"p","name":"gpu-pending"})] } else { vec![] }}))
+        }).await;
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = app(dir.path(), &server);
+        app.state.pending_name = "gpu-pending".into();
+        app.state.volume_id = "v".into();
+        dispatch(&mut app, &["recover"]).await.unwrap();
+        assert_eq!(app.state.pending_name, "gpu-pending");
+        let result = dispatch(&mut app, &["recover", "--clear"]).await;
+        assert_eq!(result.is_err(), exists);
+        assert_eq!(app.state.pending_name.is_empty(), !exists);
+        app.state.pod_id = "p".into();
+        assert!(dispatch(&mut app, &["recover", "--clear"]).await.is_err());
+        assert_eq!(app.state.pod_id, "p");
+    }
 }
 #[tokio::test]
 async fn cancelled_subprocess_is_killed() {

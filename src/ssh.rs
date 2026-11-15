@@ -1,6 +1,6 @@
 use crate::{
     api::{Api, Pod},
-    config::{App, REMOTE_HOME, WORKSPACE, atomic_file, home, private_dir},
+    config::{App, REMOTE_HOME, VERSION, WORKSPACE, atomic_file, home, private_dir},
     process::{self, Terminal},
 };
 use anyhow::{Context, Result, bail};
@@ -52,7 +52,23 @@ pub fn remote_path(s: &str) -> Result<String> {
     }
     Ok(path.to_string_lossy().into())
 }
+pub fn transfer_path(s: &str) -> Result<String> {
+    if Path::new(s).is_absolute() && !s.contains(['\0', '\r', '\n']) {
+        return Ok(clean_path(Path::new(s)).to_string_lossy().into());
+    }
+    remote_path(s)
+}
 impl App {
+    pub async fn check_worker(&self, pod: &Pod) -> Result<()> {
+        let version = self.remote_output(pod, &["fastgpu", "--version"]).await?;
+        if version.trim() != format!("fastgpu version {VERSION}") {
+            bail!(
+                "remote CLI version mismatch ({}): the image must contain fastgpu {VERSION}. Updating the local CLI does not update the Pod. Run fastgpu down (retains the Network Volume), fastgpu init --image YOUR_ACCOUNT/fastgpu-workspace:{VERSION}, then fastgpu up --small --skip-model",
+                version.trim()
+            );
+        }
+        Ok(())
+    }
     pub fn ssh_config(&self, pod: &Pod) -> Result<()> {
         let endpoint = pod
             .ssh
@@ -216,7 +232,7 @@ impl App {
         self.state.tunnel_port = 0;
     }
     pub async fn transfer(&self, pod: &Pod, local: &str, remote: &str, push: bool) -> Result<()> {
-        let mut remote_path = remote_path(remote)?;
+        let mut remote_path = transfer_path(remote)?;
         self.ssh_config(pod)?;
         let mut local_path = clean_path(&std::path::absolute(local)?)
             .to_string_lossy()
