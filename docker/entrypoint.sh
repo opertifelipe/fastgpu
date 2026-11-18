@@ -27,7 +27,7 @@ exec 9>"$state/workspace.lock"
 flock -n 9 || { echo 'Another fastgpu environment is already using this volume' >&2; exit 1; }
 [[ ! -e /home/gpu || -L /home/gpu ]] || { echo '/home/gpu must be a symlink' >&2; exit 1; }
 ln -sfn "$state/home" /home/gpu
-runuser -u gpu -- mkdir -p /home/gpu/progetti /home/gpu/checkpoints /home/gpu/datasets /home/gpu/.cache
+runuser -u gpu -- mkdir -p /home/gpu/.cache
 # SSH authorized keys stay on the local disk, which enforces POSIX permissions.
 install -d -m 755 /etc/ssh/authorized_keys
 printf '%s\n' "$PUBLIC_KEY" > /etc/ssh/authorized_keys/gpu

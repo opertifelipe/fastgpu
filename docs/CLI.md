@@ -171,7 +171,7 @@ The context default is not an automatic memory-fit calculation. Choose `--contex
 | `/home/gpu/.cache` | Hugging Face, PyTorch, and uv caches |
 | `/workspace/.gpu/hostkeys/POD_ID` | Persistent SSH host identity for each Pod |
 
-The image initializes `progetti`, `checkpoints`, `datasets`, and `.cache` under the home directory. You may create `projects` or any other directories explicitly. Files outside the Network Volume are not retained when the Pod is deleted.
+The image initializes `.cache` under the home directory. Create directories for projects, checkpoints, or datasets as needed. Files outside the Network Volume are not retained when the Pod is deleted.
 
 ## Command overview
 

@@ -130,7 +130,7 @@ impl App {
                     .await?,
             );
         }
-        let mut report = json!({"pod":public_pod_details(&raw),"volumes":volumes,"connections":connections,"persistence":{"mount":WORKSPACE,"home":format!("{REMOTE_HOME} -> /workspace/.gpu/home"),"repository":"/home/gpu/progetti","models":crate::models::MODEL_DIR,"huggingface_cache":"/home/gpu/.cache/huggingface","ollama":"/workspace/.gpu/ollama/models"},"note":"API gpu.memory is system RAM, not VRAM; compute rate is USD/hour, storage is billed separately"});
+        let mut report = json!({"pod":public_pod_details(&raw),"volumes":volumes,"connections":connections,"persistence":{"mount":WORKSPACE,"home":format!("{REMOTE_HOME} -> /workspace/.gpu/home"),"models":crate::models::MODEL_DIR,"huggingface_cache":"/home/gpu/.cache/huggingface","ollama":"/workspace/.gpu/ollama/models"},"note":"API gpu.memory is system RAM, not VRAM; compute rate is USD/hour, storage is billed separately"});
         if live {
             let script = "import json,os,platform,subprocess\nfrom pathlib import Path\ngpu=subprocess.run(['nvidia-smi','--query-gpu=name,memory.total,memory.used,utilization.gpu,driver_version','--format=csv'],capture_output=True,text=True)\nprint(json.dumps({'system':platform.platform(),'visible_cpus':os.cpu_count(),'resolved_home':os.path.realpath('/home/gpu'),'gpu_csv':gpu.stdout.strip(),'gpu_error':gpu.stderr.strip(),'kernel_memory':Path('/proc/meminfo').read_text().splitlines()[:3]}))";
             report["remote_system"] =
