@@ -32,4 +32,4 @@ Running `fastgpu` without arguments displays help. Explicit startup with `up` re
 
 ## Future extensions
 
-Extension points include engine definitions, Docker installation scripts, and profile configuration. Continuous synchronization, autonomous shutdown, S3 transfers, and training management are outside the current implementation. Start with the [README](README.md) and see the [CLI reference](docs/CLI.md) and [implementation course](docs/how-to.md) for details.
+Extension points include engine definitions, Docker installation scripts, and profile configuration. Continuous synchronization, autonomous shutdown, S3 transfers, and training management are outside the current implementation. Start with the [README](README.md) and see the [CLI reference](docs/manual.md) and [implementation course](docs/how-to.md) for details.

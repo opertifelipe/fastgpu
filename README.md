@@ -33,7 +33,7 @@ make npm-package
 npm install -g ./dist/fastgpu-0.3.0.tgz
 ```
 
-Installing an existing archive needs Node/npm, but no Cargo or compilation. The repository currently sets `private: true`: this workflow does **not** imply that the package is published on the npm registry. See [build compatibility and installation](docs/CLI.md#installation) and the [public release tutorial](docs/how-to.md#31-publishing-a-public-release).
+Installing an existing archive needs Node/npm, but no Cargo or compilation. The repository currently sets `private: true`: this workflow does **not** imply that the package is published on the npm registry. See [build compatibility and installation](docs/manual.md#installation) and the [public release tutorial](docs/how-to.md#31-publishing-a-public-release).
 
 If you have both installations, `command -v fastgpu` shows which one your shell runs. Running `fastgpu` without arguments prints the logo and help; it does not start compute.
 
@@ -65,7 +65,7 @@ fastgpu doctor --remote
 fastgpu shell
 ```
 
-`small` selects the cheapest compatible offer below $1.50/hour. Other size bands and exact selection rules are in the [CLI reference](docs/CLI.md#fastgpu-up). Availability depends on the volume's data center. `--max-price` caps a new Pod's compute rate, not storage charges or total spend.
+`small` selects the cheapest compatible offer below $1.50/hour. Other size bands and exact selection rules are in the [CLI reference](docs/manual.md#fastgpu-up). Availability depends on the volume's data center. `--max-price` caps a new Pod's compute rate, not storage charges or total spend.
 
 `up` reuses the selected Pod. It does not change that Pod's image or GPU. Without `--skip-model`, it also prepares the Qwen preset, approximately 16.5 GB. It does not start inference.
 
@@ -91,7 +91,7 @@ fastgpu pull home:checkpoints/ ./local-checkpoints
 
 `push` uploads from this computer; `pull` downloads from the Pod. `home:` refers to the persistent home and `vol:` to the volume root. Transfers also accept absolute paths such as `/tmp/job`, whose files are lost when the Pod is deleted. Source directories ending in `/` copy their contents. Transfers may update same-name files but retain destination-only files; common environment/key files and virtual environments are excluded.
 
-Use `fastgpu shell mkdir -p ...` to create directories. There is no separate `fastgpu mkdir` command. For long training sessions, use [tmux and persistent project environments](docs/CLI.md#remote-project-workflow).
+Use `fastgpu shell mkdir -p ...` to create directories. There is no separate `fastgpu mkdir` command. For long training sessions, use [tmux and persistent project environments](docs/manual.md#remote-project-workflow).
 
 ## Serve a model
 
@@ -117,7 +117,7 @@ fastgpu deploy home:checkpoints/experiment --engine vllm --name my-model --conte
 
 llama.cpp requires GGUF. vLLM also supports compatible checkpoints and Hugging Face IDs; Ollama imports compatible models into its own persistent store. Engine compatibility and VRAM requirements vary. Only one managed inference service runs at a time; changing the model or engine replaces it.
 
-`fastgpu model list` lists installed GGUFs and their deploy targets. `fastgpu model pull nanbeige4.3-33b` downloads the second preset without starting inference. See [model management and deployment](docs/CLI.md#models-and-inference) for every option, tokenizer requirements, Modelfiles, and model verification.
+`fastgpu model list` lists installed GGUFs and their deploy targets. `fastgpu model pull nanbeige4.3-33b` downloads the second preset without starting inference. See [model management and deployment](docs/manual.md#models-and-inference) for every option, tokenizer requirements, Modelfiles, and model verification.
 
 ## Inspect and finish
 
@@ -135,17 +135,17 @@ fastgpu down
 
 `undeploy` stops inference and closes its tunnel while leaving compute running. `stop` requests a stopped Pod that `up` can attempt to resume. **`down` deletes the managed Pod and its container disk, retaining the Network Volume.** Storage remains billable. Closing SSH, VS Code, or a tunnel does not terminate compute.
 
-After an uncertain creation, inspect `fastgpu recover` and `fastgpu pods` before retrying. [Recovery and troubleshooting](docs/CLI.md#troubleshooting) explain how to avoid creating duplicate resources.
+After an uncertain creation, inspect `fastgpu recover` and `fastgpu pods` before retrying. [Recovery and troubleshooting](docs/manual.md#troubleshooting) explain how to avoid creating duplicate resources.
 
 ## Image upgrades
 
 The published Rust image is `felipeoperti/fastgpu-workspace:0.3.0`. An existing profile keeps its saved image until you change it. Save work on persistent storage, run `fastgpu down`, select the matching image with `fastgpu init --image ...`, and create a new Pod. Updating the local binary alone does not update the remote worker.
 
-See [the image reference and validated digest](docs/CLI.md#container-image) for reproducible selection and custom builds.
+See [the image reference and validated digest](docs/manual.md#container-image) for reproducible selection and custom builds.
 
 ## Documentation and development
 
-- [Complete CLI reference](docs/CLI.md): all commands, flags, defaults, storage, recovery, and validation limits.
+- [Complete CLI reference](docs/manual.md): all commands, flags, defaults, storage, recovery, and validation limits.
 - [From zero to fastgpu](docs/how-to.md): Rust foundations, implementation walkthrough, SSH tunnels, npm packaging, and public releases.
 - [Design decisions](DESIGN.md): architecture and project boundaries.
 

@@ -2,7 +2,7 @@
 
 This course takes you from a first terminal command to understanding how the Rust implementation of fastgpu is assembled. It assumes no previous experience with Rust, npm, or SSH. Read Part I before Part II; work through the exercises in a separate directory. Part II walks through the actual repository, file by file, and explains the order in which to build and test each component. The repository source remains the complete implementation: examples in this course are deliberately small teaching examples, not replacements for all production checks.
 
-This course matches the 0.3.0 source tree. The [CLI manual](CLI.md) describes the available commands; the [README](../README.md) is the shorter operating introduction. The project contains infrastructure operations that can create billable resources and delete resources: use local fixtures while learning and understand a command before running it against a real account.
+This course matches the 0.3.0 source tree. The [CLI manual](manual.md) describes the available commands; the [README](../README.md) is the shorter operating introduction. The project contains infrastructure operations that can create billable resources and delete resources: use local fixtures while learning and understand a command before running it against a real account.
 
 ## Course map
 
@@ -93,7 +93,7 @@ node --version
 npm --version
 ```
 
-Do not include credentials in a repository, command examples, logs, or a Docker build context. An environment variable avoids storing a key in source, but shell history and process environments still require care. The [CLI manual](CLI.md) explains the interactive key-entry workflow.
+Do not include credentials in a repository, command examples, logs, or a Docker build context. An environment variable avoids storing a key in source, but shell history and process environments still require care. The [CLI manual](manual.md) explains the interactive key-entry workflow.
 
 ## 4. Create and run your first Rust program
 
@@ -554,7 +554,7 @@ Define `Cli` with Clap's `Parser` derive and an optional `Commands` enum. Each e
 
 `execute` handles help/version before loading configuration. With no subcommand, it prints root help and returns successfully; it never defaults to `up`. The root command uses `HELP_BANNER` as Clap `before_help`, preserving the supplied ASCII logo. With a command, execution constructs `App` and delegates to `App::dispatch`. `dispatch` acquires the profile lock for the operations identified as mutations and routes to the relevant module. Volume deletion requires the exact ID confirmation and checks configured, managed, and attached volumes. The `deploy` method validates first, starts or reuses a Pod, checks the remote CLI version, sends a JSON manifest over SSH stdin, waits for readiness, opens the tunnel, and checks the model through that tunnel.
 
-**Checkpoint:** enumerate help pages, test mutual exclusion and invalid arguments, and verify `shell` does not consume flags intended for the remote command. Test `volume` as an alias for `volumes`. Read the [command manual](CLI.md) alongside the enum definitions.
+**Checkpoint:** enumerate help pages, test mutual exclusion and invalid arguments, and verify `shell` does not consume flags intended for the remote command. Test `volume` as an alias for `volumes`. Read the [command manual](manual.md) alongside the enum definitions.
 
 ### 26.1 A complete starter parser
 
@@ -809,7 +809,7 @@ Inspect the resulting `package_test_dir` and remove that temporary directory whe
 
 An ELF header check does not prove that a binary runs on every Linux distribution. Its imported system-library symbols depend on the build environment. Building on a new glibc system can produce a binary that fails to load on an older one; npm metadata cannot fix that at runtime.
 
-Use an appropriate build baseline and test the actual executable/archive on target systems. The project's [Docker CLI-stage workflow](CLI.md#portable-build-baseline) uses Debian Bookworm and accepts the result through `FASTGPU_NPM_BINARY`. An Alpine/musl package, ARM64 build, macOS client, or Windows port would require separate work and validation. The current code uses Unix-specific APIs and the package explicitly targets Linux x64/glibc.
+Use an appropriate build baseline and test the actual executable/archive on target systems. The project's [Docker CLI-stage workflow](manual.md#portable-build-baseline) uses Debian Bookworm and accepts the result through `FASTGPU_NPM_BINARY`. An Alpine/musl package, ARM64 build, macOS client, or Windows port would require separate work and validation. The current code uses Unix-specific APIs and the package explicitly targets Linux x64/glibc.
 
 For broader native distribution, one possible future design is a small platform-selecting package plus separate platform-specific packages. That is an architectural option, not something the current launcher implements. Keep one tested platform working before adding a build matrix.
 
@@ -861,7 +861,7 @@ This changes npm metadata only. In this repository also update and review:
 
 Regenerate/update the Cargo lockfile as needed for the changed root package and review its diff; do not accidentally fold unrelated dependency upgrades into the release. Then run the locked checks. The packaging hook refuses a mismatch between Cargo, npm, and the binary. The remote worker also checks the client version during deployment. See [npm version](https://docs.npmjs.com/cli/v11/commands/npm-version/) for its Git-tag and script behavior.
 
-Build and publish the matching worker image through the [image workflow](CLI.md#upgrading-the-image), record its digest, and make it available to consumers. npm publication alone cannot make a private local Docker image usable by RunPod.
+Build and publish the matching worker image through the [image workflow](manual.md#upgrading-the-image), record its digest, and make it available to consumers. npm publication alone cannot make a private local Docker image usable by RunPod.
 
 ### Step 4: build the exact archive you will publish
 
